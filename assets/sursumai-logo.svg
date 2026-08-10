@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- SursumAI logo: open-weights "lift" + up arrow (Sursum corda) -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+
+  <!-- weight plate (open-weights) -->
+  <circle cx="256" cy="256" r="208" fill="none" stroke="url(#g)" stroke-width="40"/>
+
+  <!-- barbell: the bar being lifted up -->
+  <rect x="88" y="288" width="336" height="44" rx="22" fill="url(#g)"/>
+
+  <!-- two weights on the barbell -->
+  <circle cx="168" cy="310" r="26" fill="#6366f1"/>
+  <circle cx="344" cy="310" r="26" fill="#6366f1"/>
+
+  <!-- up arrow (Sursum corda: lift up) -->
+  <path d="M256 120 L332 214 H288 V292 H224 V214 H180 Z" fill="#fff"/>
+</svg>

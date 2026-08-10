@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SursumAI — Self-Hosting Models</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <!-- ======= LANDING / HERO ======= -->
+  <section id="landing">
+    <nav class="nav">
+      <span class="logo">◆ SursumAI</span>
+      <div>
+        <button class="btn btn-ghost" onclick="showView('login')">Sign in</button>
+        <button class="btn btn-primary" onclick="showView('login')">Get started</button>
+      </div>
+    </nav>
+    <div class="hero">
+      <h1>
+        Self-Hosting models<br />
+        for <span id="rotator" class="typing">open weights</span>
+      </h1>
+      <p class="sub">
+        Self-hosted multimodal models, one click away — on your account, at your cost.
+      </p>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="showView('login')">Get started</button>
+        <button class="btn" onclick="showView('login')">View demo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======= LOGIN ======= -->
+  <section id="login" class="auth-wrap hidden">
+    <div class="auth-card glass">
+      <h2 id="authTitle">Welcome back</h2>
+      <p id="authSub">Sign in to manage your deployments</p>
+      <div class="field">
+        <label>Email</label>
+        <input id="auth_email" class="input" type="email" autocomplete="email" placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="auth_password" class="input" type="password" autocomplete="current-password" placeholder="••••••••" />
+      </div>
+      <button id="authBtn" class="btn btn-primary" style="width:100%" onclick="submitAuth()">Sign in</button>
+      <button id="authToggle" class="btn btn-ghost" style="width:100%" onclick="toggleAuth()">Create account</button>
+    </div>
+  </section>
+
+  <!-- ======= DASHBOARD ======= -->
+  <section id="dashboard" class="hidden">
+    <nav class="nav">
+      <span class="logo">◆ SursumAI</span>
+      <div class="nav-right">
+        <span id="userName" class="nav-user hidden"></span>
+        <button class="btn btn-ghost" onclick="logout()">Sign out</button>
+      </div>
+    </nav>
+    <div class="dash">
+      <div class="dash-head">
+        <h2>Deployments</h2>
+        <button class="btn btn-primary" onclick="openModal()">+ New</button>
+      </div>
+      <div id="sursumaiGrid" class="sursum-grid"></div>
+    </div>
+  </section>
+
+  <!-- ======= NEW DEPLOY MODAL ======= -->
+  <div id="modal" class="overlay hidden" onclick="if(event.target===this) closeModal()">
+    <div class="modal glass">
+      <div class="modal-head">
+        <div>
+          <h3 id="modalTitle">New deployment</h3>
+          <p class="modal-sub" id="modalSub">Provision a self-hosted model on your infrastructure.</p>
+        </div>
+        <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><span class="sec-num">1</span><span class="sec-title">Model</span></div>
+        <div class="field">
+          <div class="providers">
+            <div class="provider" data-provider="qwen" onclick="pickProvider('qwen')">
+              <img class="plogo" src="https://avatars.githubusercontent.com/u/141221163?s=80" alt="Qwen" /><span class="pname">Qwen</span>
+            </div>
+            <div class="provider" data-provider="kimi" onclick="pickProvider('kimi')">
+              <img class="plogo" src="https://avatars.githubusercontent.com/u/129152888?s=80" alt="Kimi" /><span class="pname">Kimi</span>
+            </div>
+            <div class="provider" data-provider="deepseek" onclick="pickProvider('deepseek')">
+              <img class="plogo" src="https://avatars.githubusercontent.com/u/148330874?s=80" alt="DeepSeek" /><span class="pname">DeepSeek</span>
+            </div>
+            <div class="provider" data-provider="llama" onclick="pickProvider('llama')">
+              <img class="plogo" src="https://avatars.githubusercontent.com/u/153379578?s=80" alt="Llama" /><span class="pname">Llama</span>
+            </div>
+            <div class="provider" data-provider="mistral" onclick="pickProvider('mistral')">
+              <img class="plogo" src="https://avatars.githubusercontent.com/u/132372032?s=80" alt="Mistral" /><span class="pname">Mistral</span>
+            </div>
+            <div class="provider" data-provider="bonsai" onclick="pickProvider('bonsai')">
+              <img class="plogo" src="/assets/bonsai-logo.svg" alt="Bonsai" /><span class="pname">Bonsai</span>
+            </div>
+            <div class="provider" data-provider="custom" onclick="pickProvider('custom')">
+              <span class="plogo pl-custom">+</span><span class="pname">Custom</span>
+            </div>
+          </div>
+          <div id="provider_models" class="provider-models hidden">
+            <div id="provider_models_list" class="model-list-static"></div>
+          </div>
+          <input id="f_model" class="input hidden" placeholder="user/my-finetuned" autocomplete="off" />
+          <p class="hint" id="f_model_hint">Choose a provider, then a model. Or pick Custom for a finetuned / huggingface link.</p>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><span class="sec-num">2</span><span class="sec-title">Runtime</span></div>
+        <div class="runtime-cards">
+          <button class="runtime-card active" data-runtime="vllm" onclick="setRuntime('vllm')">
+            <img class="rlogo" src="https://avatars.githubusercontent.com/u/136984999?s=80" alt="vLLM" />
+            <span class="rname">vLLM</span>
+            <span class="rdesc">High-throughput inference on NVIDIA GPUs</span>
+          </button>
+          <button class="runtime-card" data-runtime="llama" onclick="setRuntime('llama')">
+            <img class="rlogo" src="https://avatars.githubusercontent.com/u/134263123?s=80" alt="llama.cpp" />
+            <span class="rname">llama-server</span>
+            <span class="rdesc">llama.cpp · runs anywhere, incl. vision</span>
+          </button>
+        </div>
+        <p class="runtime-note" id="runtimeNote">Detecting your machine…</p>
+      </div>
+
+      <details class="advanced" id="advancedSec">
+        <summary>Advanced options</summary>
+
+        <div class="sec">
+          <div class="sec-head"><span class="sec-num">3</span><span class="sec-title">Target</span></div>
+          <div class="target-cards">
+            <button class="target-card active" data-target="local" onclick="setTarget('local')">
+              <span class="tname">Local</span>
+              <span class="tdesc">This machine</span>
+            </button>
+            <button class="target-card disabled" data-target="aws" onclick="setTarget('aws')" disabled title="Coming soon">
+              <span class="tname">AWS</span>
+              <span class="tdesc">Cloud</span>
+              <span class="soon-badge">Soon</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-head"><span class="sec-num">4</span><span class="sec-title">Configuration</span></div>
+          <div class="cfg-grid">
+            <div class="field"><label>GPUs</label><input id="f_gpus" class="input" type="number" value="1" min="1" /></div>
+            <div class="field"><label>Nodes</label><input id="f_nodes" class="input" type="number" value="1" min="1" /></div>
+            <div class="field"><label>GPU mem util</label><input id="f_mem" class="input" type="number" value="0.50" step="0.05" min="0.05" max="1" /></div>
+            <div class="field"><label>Max model len</label><input id="f_len" class="input" type="number" value="300" /></div>
+            <div class="field"><label>Max tokens</label><input id="f_tokens" class="input" type="number" value="2048" /></div>
+            <div class="field"><label>Temperature</label><input id="f_temp" class="input" type="number" value="0.0" step="0.1" min="0" max="2" /></div>
+          </div>
+          <div class="field hf-field">
+            <label>Hugging Face token <span class="opt">(optional, faster downloads)</span></label>
+            <input id="f_hf_token" class="input" type="password" placeholder="hf_..." autocomplete="off" />
+          </div>
+        </div>
+      </details>
+
+      <button id="deployBtn" class="btn btn-primary" style="width:100%" onclick="deploy()">Deploy</button>
+      <div id="progress" class="progress hidden">
+        <span class="spinner"></span>
+        <span id="progressText">Provisioning…</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- ======= DEPLOY DETAIL MODAL ======= -->
+  <div id="detailModal" class="overlay hidden" onclick="if(event.target===this) closeDetail()">
+    <div class="modal detail-modal glass">
+      <div class="detail-head">
+        <div>
+          <h3 id="detailTitle">Deployment</h3>
+          <p class="modal-sub" id="detailSub">—</p>
+        </div>
+        <button class="modal-close" onclick="closeDetail()" aria-label="Close">✕</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="metrics" onclick="switchTab('metrics')">Metrics</button>
+        <button class="tab" data-tab="test" onclick="switchTab('test')">Test</button>
+        <button class="tab" data-tab="code" onclick="switchTab('code')">Code</button>
+      </div>
+
+      <!-- ===== Metrics ===== -->
+      <div id="tab-metrics" class="tab-pane active">
+        <div class="kv-row">
+          <span class="status" id="detailStatus"><span class="dot"></span>—</span>
+          <code class="url" id="detailUrl">—</code>
+        </div>
+        <div class="metrics-grid" id="detailMetricsGrid"></div>
+        <div class="spark-row">
+          <span class="spark-label">Output tokens / s</span>
+          <span id="detailSpark"></span>
+        </div>
+      </div>
+
+      <!-- ===== Test (playground) ===== -->
+      <div id="tab-test" class="tab-pane">
+        <div class="play-area">
+          <div id="playMessages" class="play-messages">
+            <div class="play-empty">Send a message to test this model.</div>
+          </div>
+          <div class="play-input-row">
+            <input type="file" id="playImageInput" accept="image/*" hidden
+              onchange="attachPlayImage(event)">
+            <div class="play-attach-col">
+              <button class="btn btn-ghost play-attach" id="playAttach" onclick="pickPlayImage()"
+                title="Attach an image (vision models)" disabled>Image</button>
+              <div id="playImagePreview" class="play-image-preview hidden">
+                <img id="playImageThumb" alt="attached image">
+                <button class="play-image-remove" onclick="removePlayImage()" title="Remove image">✕</button>
+              </div>
+            </div>
+            <textarea id="playInput" class="input play-input" rows="2" placeholder="Type a message…"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendPlay()}" disabled></textarea>
+            <button class="btn btn-primary" id="playSend" onclick="sendPlay()" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Code ===== -->
+      <div id="tab-code" class="tab-pane">
+        <div class="code-tabs">
+          <button class="code-tab active" data-lang="python" onclick="switchLang('python')">Python</button>
+          <button class="code-tab" data-lang="js" onclick="switchLang('js')">JavaScript</button>
+          <button class="code-tab" data-lang="curl" onclick="switchLang('curl')">curl</button>
+        </div>
+        <div class="code-block-wrap">
+          <button class="code-copy" onclick="copySnippet()">Copy</button>
+          <pre class="code-block" id="codeBlock"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======= LOGS MODAL ======= -->
+  <div id="logsModal" class="overlay hidden" onclick="if(event.target===this) closeLogs()">
+    <div class="modal logs-modal glass">
+      <div class="logs-head">
+        <h3 id="logsTitle">Logs</h3>
+        <div class="logs-actions">
+          <button class="btn" onclick="refreshLogs()">Refresh</button>
+          <button class="btn btn-ghost" onclick="closeLogs()">Close</button>
+        </div>
+      </div>
+      <pre id="logsContent" class="logs-content">Loading…</pre>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

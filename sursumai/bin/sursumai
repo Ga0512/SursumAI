@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""SursumAI CLI — daemon manager + thin wrapper over the central API.
+
+Commands:
+  sursumai               start the 3 processes (if needed) and open the browser
+  sursumai --ui          same as above (explicit, used by desktop shortcut)
+  sursumai status        show running state of web/central/agent
+  sursumai stop          stop the 3 processes (model deploys keep running)
+  sursumai login [email] [password]   store a token for API commands
+  sursumai logout        remove the stored token
+  sursumai list          table of deploys
+  sursumai deploy <model> [--runtime vllm|llama] [--gpus N]
+  sursumai logs <id> [--tail N]
+  sursumai destroy <id> [--yes]
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import platform
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+SURSUMAI_ROOT = Path(__file__).resolve().parent.parent.parent
+
+CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", "http://localhost:8001")
+WEB_URL = os.environ.get("SURSUMAI_WEB", "http://localhost:3000")
+AGENT_URL = os.environ.get("AGENT_URL", "http://localhost:8010")
+AGENT_KEY = os.environ.get("AGENT_KEY", "dev-agent-key")
+
+CONFIG_DIR = Path.home() / ".config" / "sursumai"
+AUTH_FILE = CONFIG_DIR / "auth.json"
+LOG_DIR = Path(os.environ.get("SURSUMAI_LOG_DIR", "/tmp/opencode"))
+
+PORT_INFO = {
+    "web": {"port": 3000, "url": WEB_URL, "pattern": "web/server.py"},
+    "central": {"port": 8001, "url": CENTRAL_URL, "pattern": "uvicorn central.app"},
+    "agent": {"port": 8010, "url": AGENT_URL, "pattern": "uvicorn agent.app"},
+}
+
+
+class CliError(Exception):
+    pass
+
+
+# ---------- human helpers ----------
+
+def ok(msg: str) -> None:
+    print(f"✓ {msg}")
+
+
+def warn(msg: str) -> None:
+    print(f"! {msg}")
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"✗ {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# ---------- http ----------
+
+def _http(method: str, path: str, body: dict | None = None, token: str | None = None) -> tuple[int, dict]:
+    url = CENTRAL_URL.rstrip("/") + path
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            return resp.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        detail = _error_detail(e)
+        if e.code == 401 and "token" in (detail or "").lower():
+            raise CliError("login expired — run `sursumai login`")
+        raise CliError(detail or f"server error ({e.code})")
+    except urllib.error.URLError:
+        raise CliError("can't reach SursumAI central — is it running? run `sursumai` first")
+
+
+def _error_detail(e: urllib.error.HTTPError) -> str:
+    try:
+        body = json.loads(e.read().decode() or "{}")
+        if isinstance(body, dict):
+            detail = body.get("detail")
+            if isinstance(detail, str):
+                return detail
+            if isinstance(detail, list):
+                msgs = [d.get("msg", "") for d in detail if isinstance(d, dict)]
+                if msgs:
+                    return ", ".join(msgs)
+        return str(body)
+    except Exception:
+        return ""
+
+
+def _get(path: str, token: str | None = None) -> dict:
+    return _http("GET", path, token=token)[1]
+
+
+# ---------- auth ----------
+
+def _load_token() -> str:
+    if not AUTH_FILE.exists():
+        raise CliError("not logged in — run `sursumai login`")
+    try:
+        data = json.loads(AUTH_FILE.read_text())
+        return data.get("token", "")
+    except (json.JSONDecodeError, OSError):
+        raise CliError("stored login is corrupted — run `sursumai login`")
+
+
+def _save_token(token: str) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    AUTH_FILE.write_text(json.dumps({"token": token}))
+    os.chmod(AUTH_FILE, 0o600)
+
+
+# ---------- launcher ----------
+
+def _port_open(port: int, timeout: float = 1.5) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _start_processes() -> None:
+    py = SURSUMAI_ROOT / ".venv" / "bin" / "python"
+    if not py.exists():
+        subprocess.run(["bash", str(SURSUMAI_ROOT / "setup.sh")], check=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "AGENT_URL": AGENT_URL, "AGENT_KEY": AGENT_KEY}
+
+    commands = {
+        "agent": [str(py), "-m", "uvicorn", "agent.app:app", "--host", "0.0.0.0", "--port", "8010"],
+        "central": [str(py), "-m", "uvicorn", "central.app:app", "--host", "0.0.0.0", "--port", "8001"],
+        "web": [str(py), "web/server.py", "--port", "3000", "--host", "0.0.0.0"],
+    }
+    started = []
+    for name, info in PORT_INFO.items():
+        if _port_open(info["port"]):
+            continue
+        logf = open(LOG_DIR / f"{name}.log", "ab")
+        p = subprocess.Popen(
+            commands[name],
+            cwd=SURSUMAI_ROOT,
+            env=env,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        started.append((name, p, logf))
+
+    # wait until the three ports respond (or give up after ~15s)
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        missing = [n for n, i in PORT_INFO.items() if not _port_open(i["port"])]
+        if not missing:
+            break
+        time.sleep(0.5)
+    for name, p, logf in started:
+        if name in [n for n, i in PORT_INFO.items() if not _port_open(i["port"])]:
+            warn(f"{name} didn't come up — see {LOG_DIR}/{name}.log")
+
+
+def _open_browser(url: str) -> None:
+    if sys.platform == "win32" or os.environ.get("WSL_DISTRO_NAME"):
+        subprocess.Popen(["cmd.exe", "/c", "start", "", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        if subprocess.run(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            warn(f"open the browser at {url}")
+
+
+def cmd_launch(args: argparse.Namespace) -> None:
+    _start_processes()
+    print(f"SursumAI is up: {WEB_URL}")
+    _open_browser(WEB_URL)
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    any_down = False
+    for name, info in PORT_INFO.items():
+        state = "running" if _port_open(info["port"]) else "stopped"
+        if state == "stopped":
+            any_down = True
+        print(f"{name:8} {state:8} {info['url']}")
+    if any_down:
+        print("run `sursumai` to start everything")
+
+
+def cmd_stop(args: argparse.Namespace) -> None:
+    for name, info in PORT_INFO.items():
+        subprocess.run(["pkill", "-f", info["pattern"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1)
+    ok("stopped web, central and agent (model deploys keep running)")
+
+
+# ---------- api commands ----------
+
+def cmd_login(args: argparse.Namespace) -> None:
+    email = args.email
+    password = args.password
+    if not email:
+        email = input("email: ").strip()
+    if not password:
+        password = getpass.getpass("password: ")
+    try:
+        _, data = _http("POST", "/auth/login", {"email": email, "password": password})
+    except CliError as e:
+        die(f"login failed: {e}")
+    _save_token(data["token"])
+    ok(f"logged in as {data['user']['email']}")
+
+
+def cmd_logout(args: argparse.Namespace) -> None:
+    if AUTH_FILE.exists():
+        AUTH_FILE.unlink()
+    ok("logged out")
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    token = _load_token()
+    deploys = _get("/deploys", token)
+    if not deploys:
+        print("no deploys — run `sursumai deploy <model>`")
+        return
+    hdr = f"{'ID':34} {'STATUS':12} {'RUNTIME':6} {'MODEL':30} ENDPOINT"
+    print(hdr)
+    print("-" * len(hdr))
+    for d in deploys:
+        spec = d.get("spec", {})
+        print(
+            f"{d['id']:34} {d['status']:12} {spec.get('runtime', ''):6} "
+            f"{(spec.get('model') or '')[:30]:30} {d.get('endpoint') or ''}"
+        )
+
+
+def cmd_deploy(args: argparse.Namespace) -> None:
+    token = _load_token()
+    model = args.model
+    runtime = args.runtime
+    if not runtime:
+        runtime = "llama" if ("GGUF" in model or ".gguf" in model.lower()) else "vllm"
+    payload = {
+        "model": model,
+        "runtime": runtime,
+        "gpus": args.gpus,
+        "max_model_len": args.max_model_len,
+        "max_tokens": args.max_tokens,
+    }
+    print(f"creating deploy {model} ({runtime})…")
+    _, data = _http("POST", "/deploys", payload, token)
+    deploy_id = data["id"]
+    print(f"id {deploy_id}")
+    print(f"watch it live: {WEB_URL}")
+
+    last = ""
+    deadline = time.time() + args.timeout
+    while time.time() < deadline:
+        d = _get(f"/deploys/{deploy_id}", token)
+        status = d.get("status", "")
+        if status != last:
+            print(f"  {status}")
+            last = status
+        if status == "healthy":
+            print(f"✓ healthy — endpoint: {d.get('endpoint') or '(none)'}")
+            return
+        if status == "failed":
+            die(f"deploy failed: {d.get('error') or 'unknown reason'}")
+        time.sleep(3)
+    warn("timed out waiting for the deploy to become healthy — check `sursumai status`")
+
+
+def cmd_logs(args: argparse.Namespace) -> None:
+    token = _load_token()
+    d = _get(f"/deploys/{args.deploy_id}/logs?tail={args.tail}", token)
+    print(d.get("logs", ""))
+
+
+def cmd_destroy(args: argparse.Namespace) -> None:
+    token = _load_token()
+    deploy_id = args.deploy_id
+    if not args.yes:
+        try:
+            d = _get(f"/deploys/{deploy_id}", token)
+            spec = d.get("spec", {})
+            confirm = input(f"destroy {deploy_id} ({spec.get('model')})? [y/N] ")
+            if confirm.strip().lower() not in ("y", "yes"):
+                print("aborted")
+                return
+        except CliError:
+            pass
+    _http("DELETE", f"/deploys/{deploy_id}", token=token)
+    ok(f"destroyed {deploy_id}")
+
+
+# ---------- main ----------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="sursumai", description="SursumAI — run and manage local model deploys")
+    parser.add_argument("--ui", action="store_true", help="start everything and open the browser")
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("status", help="show running state")
+    sub.add_parser("stop", help="stop the 3 processes")
+    sub.add_parser("logout", help="remove stored login")
+
+    p_login = sub.add_parser("login", help="store a login token")
+    p_login.add_argument("email", nargs="?")
+    p_login.add_argument("password", nargs="?")
+
+    sub.add_parser("list", help="list deploys")
+
+    p_deploy = sub.add_parser("deploy", help="create a deploy")
+    p_deploy.add_argument("model")
+    p_deploy.add_argument("--runtime", choices=["vllm", "llama"], default=None)
+    p_deploy.add_argument("--gpus", type=int, default=1)
+    p_deploy.add_argument("--max-model-len", type=int, default=300)
+    p_deploy.add_argument("--max-tokens", type=int, default=2048)
+    p_deploy.add_argument("--timeout", type=int, default=1800)
+
+    p_logs = sub.add_parser("logs", help="tail deploy logs")
+    p_logs.add_argument("deploy_id")
+    p_logs.add_argument("--tail", type=int, default=300)
+
+    p_destroy = sub.add_parser("destroy", help="destroy a deploy")
+    p_destroy.add_argument("deploy_id")
+    p_destroy.add_argument("--yes", action="store_true")
+
+    args = parser.parse_args()
+
+    try:
+        if args.command is None or args.ui:
+            cmd_launch(args)
+        elif args.command == "status":
+            cmd_status(args)
+        elif args.command == "stop":
+            cmd_stop(args)
+        elif args.command == "login":
+            cmd_login(args)
+        elif args.command == "logout":
+            cmd_logout(args)
+        elif args.command == "list":
+            cmd_list(args)
+        elif args.command == "deploy":
+            cmd_deploy(args)
+        elif args.command == "logs":
+            cmd_logs(args)
+        elif args.command == "destroy":
+            cmd_destroy(args)
+    except CliError as e:
+        die(str(e))
+
+
+if __name__ == "__main__":
+    main()

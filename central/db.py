@@ -1,0 +1,295 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from core.spec import Spec
+
+
+DB_PATH = Path(__file__).resolve().parent.parent / "sursumai.db"
+
+
+class DeployState:
+    PENDING = "pending"
+    CHECKING = "checking"
+    PROVISIONING = "provisioning"
+    HEALTHY = "healthy"
+    FAILED = "failed"
+    DESTROYING = "destroying"
+    REDEPLOYING = "redeploying"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class User:
+    def __init__(self, id: str, email: str, name: str, password_hash: str,
+                 created_at: str | None = None):
+        self.id = id
+        self.email = email
+        self.name = name
+        self.password_hash = password_hash
+        self.created_at = created_at or _now()
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "email": self.email,
+            "name": self.name,
+            "created_at": self.created_at,
+        }
+
+
+class Session:
+    def __init__(self, token: str, user_id: str, expires_at: float,
+                 created_at: str | None = None):
+        self.token = token
+        self.user_id = user_id
+        self.expires_at = expires_at
+        self.created_at = created_at or _now()
+
+
+class Deploy:
+    def __init__(self, spec: Spec, user_id: str, id: str | None = None,
+                 status: str = DeployState.PENDING, endpoint: str | None = None,
+                 preflight: list[dict] | None = None,
+                 created_at: str | None = None, updated_at: str | None = None,
+                 error: str | None = None):
+        self.id = id or uuid.uuid4().hex
+        self.spec = spec
+        self.user_id = user_id
+        self.status = status
+        self.endpoint = endpoint
+        self.preflight = preflight
+        self.created_at = created_at or _now()
+        self.updated_at = updated_at or self.created_at
+        self.error = error
+
+    def to_dict(self) -> dict:
+        spec = self.spec.to_dict()
+        if spec.get("hf_token"):
+            spec["hf_token"] = "***"
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "spec": spec,
+            "status": self.status,
+            "endpoint": self.endpoint,
+            "preflight": self.preflight,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "error": self.error,
+        }
+
+
+class Store:
+    def __init__(self, path: Path = DB_PATH):
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._migrate()
+        self._conn.commit()
+
+    def _migrate(self) -> None:
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at REAL NOT NULL
+            )
+            """
+        )
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(deploys)")]
+        if not cols:
+            self._conn.execute(
+                """
+                CREATE TABLE deploys (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    spec TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    endpoint TEXT,
+                    preflight TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    error TEXT
+                )
+                """
+            )
+        elif "user_id" not in cols:
+            self._conn.execute("ALTER TABLE deploys ADD COLUMN user_id TEXT")
+        elif "preflight" not in cols:
+            self._conn.execute("ALTER TABLE deploys ADD COLUMN preflight TEXT")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS metrics (
+                deploy_id TEXT NOT NULL,
+                ts REAL NOT NULL,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+
+    # ---- users ----
+
+    def create_user(self, email: str, name: str, password_hash: str) -> User:
+        user = User(id=uuid.uuid4().hex, email=email, name=name, password_hash=password_hash)
+        self._conn.execute(
+            "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user.id, user.email, user.name, user.password_hash, user.created_at),
+        )
+        self._conn.commit()
+        return user
+
+    def get_user_by_email(self, email: str) -> User | None:
+        row = self._conn.execute(
+            "SELECT * FROM users WHERE email = ?", (email,)
+        ).fetchone()
+        return self._user_from_row(row) if row else None
+
+    def get_user_by_id(self, id: str) -> User | None:
+        row = self._conn.execute("SELECT * FROM users WHERE id = ?", (id,)).fetchone()
+        return self._user_from_row(row) if row else None
+
+    def _user_from_row(self, row: sqlite3.Row) -> User:
+        return User(
+            id=row["id"], email=row["email"], name=row["name"],
+            password_hash=row["password_hash"], created_at=row["created_at"],
+        )
+
+    # ---- sessions ----
+
+    def create_session(self, token: str, user_id: str, expires_at: float) -> None:
+        self._conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token, user_id, _now(), expires_at),
+        )
+        self._conn.commit()
+
+    def get_user_by_token(self, token: str) -> User | None:
+        row = self._conn.execute(
+            "SELECT * FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] < time.time():
+            self._conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            self._conn.commit()
+            return None
+        return self.get_user_by_id(row["user_id"])
+
+    def delete_session(self, token: str) -> None:
+        self._conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        self._conn.commit()
+
+    # ---- deploys ----
+
+    def create(self, spec: Spec, user_id: str) -> Deploy:
+        deploy = Deploy(spec, user_id)
+        self._upsert(deploy)
+        return deploy
+
+    def get(self, id: str) -> Deploy | None:
+        row = self._conn.execute("SELECT * FROM deploys WHERE id = ?", (id,)).fetchone()
+        return self._from_row(row) if row else None
+
+    def list(self, user_id: str | None = None) -> list[Deploy]:
+        if user_id is None:
+            rows = self._conn.execute("SELECT * FROM deploys ORDER BY created_at DESC").fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM deploys WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+            ).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def update(self, deploy: Deploy) -> None:
+        deploy.updated_at = _now()
+        self._upsert(deploy)
+
+    def delete(self, id: str) -> None:
+        self._conn.execute("DELETE FROM deploys WHERE id = ?", (id,))
+        self._conn.execute("DELETE FROM metrics WHERE deploy_id = ?", (id,))
+        self._conn.commit()
+
+    def clear_metrics(self, deploy_id: str) -> None:
+        self._conn.execute("DELETE FROM metrics WHERE deploy_id = ?", (deploy_id,))
+        self._conn.commit()
+
+    def save_metrics(self, deploy_id: str, payload: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO metrics (deploy_id, ts, payload) VALUES (?, ?, ?)",
+            (deploy_id, payload.get("ts", time.time()), json.dumps(payload)),
+        )
+        self._conn.commit()
+
+    def latest_metrics(self, deploy_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT payload FROM metrics WHERE deploy_id = ? ORDER BY ts DESC LIMIT 1",
+            (deploy_id,),
+        ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def list_metrics(self, deploy_id: str, limit: int = 100) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT ts, payload FROM metrics WHERE deploy_id = ? ORDER BY ts DESC LIMIT ?",
+            (deploy_id, limit),
+        ).fetchall()
+        return [json.loads(r["payload"]) for r in reversed(rows)]
+
+    def _upsert(self, deploy: Deploy) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO deploys (id, user_id, spec, status, endpoint, preflight, created_at, updated_at, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                spec=excluded.spec,
+                status=excluded.status,
+                endpoint=excluded.endpoint,
+                preflight=excluded.preflight,
+                updated_at=excluded.updated_at,
+                error=excluded.error
+            """,
+            (
+                deploy.id,
+                deploy.user_id,
+                json.dumps(deploy.spec.to_dict()),
+                deploy.status,
+                deploy.endpoint,
+                json.dumps(deploy.preflight) if deploy.preflight is not None else None,
+                deploy.created_at,
+                deploy.updated_at,
+                deploy.error,
+            ),
+        )
+        self._conn.commit()
+
+    def _from_row(self, row: sqlite3.Row) -> Deploy:
+        return Deploy(
+            id=row["id"],
+            user_id=row["user_id"] or "",
+            spec=Spec.from_dict(json.loads(row["spec"])),
+            status=row["status"],
+            endpoint=row["endpoint"],
+            preflight=json.loads(row["preflight"]) if row["preflight"] else None,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            error=row["error"],
+        )

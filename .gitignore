@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+sursumai.db
+sursumai.db-wal
+sursumai.db-shm
+sursumai-logs/
+llama-models/
+llama-bin/
+.env
