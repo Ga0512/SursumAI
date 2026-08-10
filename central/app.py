@@ -5,6 +5,7 @@ import re
 import time
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -69,6 +70,7 @@ class ChatRequest(BaseModel):
     messages: list[dict]
     max_tokens: int = 512
     temperature: float | None = None
+    stream: bool = False
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -360,13 +362,25 @@ async def get_logs(deploy_id: str, tail: int = 300, user=Depends(_current_user))
 
 @app.post("/deploys/{deploy_id}/chat")
 async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_current_user)):
-    """Proxy a chat completion to the deploy's OpenAI-compatible endpoint."""
+    """Proxy a chat completion to the deploy's OpenAI-compatible endpoint.
+    Supports streaming (SSE) when req.stream is true."""
     deploy = _get_owned_deploy(deploy_id, user.id)
     if not deploy.endpoint:
         raise HTTPException(status_code=409, detail="deploy has no endpoint yet")
-    payload: dict = {"model": deploy.spec.model, "messages": req.messages, "max_tokens": req.max_tokens}
+    payload: dict = {
+        "model": deploy.spec.model,
+        "messages": req.messages,
+        "max_tokens": req.max_tokens,
+        "stream": req.stream,
+    }
     if req.temperature is not None:
         payload["temperature"] = req.temperature
+    if req.stream:
+        return StreamingResponse(
+            agent_client.chat_stream(deploy.endpoint, payload),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     try:
         result = await asyncio.to_thread(agent_client.chat, deploy.endpoint, payload)
     except agent_client.AgentError as e:

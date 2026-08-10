@@ -121,11 +121,13 @@
             <img class="rlogo" src="https://avatars.githubusercontent.com/u/136984999?s=80" alt="vLLM" />
             <span class="rname">vLLM</span>
             <span class="rdesc">High-throughput inference on NVIDIA GPUs</span>
+            <span class="rtag">Best for production / real traffic</span>
           </button>
           <button class="runtime-card" data-runtime="llama" onclick="setRuntime('llama')">
             <img class="rlogo" src="https://avatars.githubusercontent.com/u/134263123?s=80" alt="llama.cpp" />
             <span class="rname">llama-server</span>
             <span class="rdesc">llama.cpp · runs anywhere, incl. vision</span>
+            <span class="rtag">Great for personal / small team use</span>
           </button>
         </div>
         <p class="runtime-note" id="runtimeNote">Detecting your machine…</p>
@@ -226,6 +228,7 @@
             <textarea id="playInput" class="input play-input" rows="2" placeholder="Type a message…"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendPlay()}" disabled></textarea>
             <button class="btn btn-primary" id="playSend" onclick="sendPlay()" disabled>Send</button>
+            <button class="btn btn-danger play-stop hidden" id="playStop" onclick="stopPlay()">Stop</button>
           </div>
         </div>
       </div>

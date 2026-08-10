@@ -1,74 +1,87 @@
 # SursumAI — Self-Hosting Models
 
-> Seu modelo. Sua máquina. Sua URL.
+> Your model. Your machine. Your URL.
 
-O SursumAI sobe **modelos de IA open-source na sua própria máquina** e te dá uma URL
-estilo OpenAI pra usar — tudo por uma interface web, sem precisar de terminal,
-Docker, Python ou GPU pra começar.
+SursumAI runs **open-source AI models on your own machine** and gives you an
+OpenAI-style URL to use — all through a web interface. No terminal, Docker,
+Python, or GPU knowledge needed to get started.
 
-Escolha um modelo, clique **Deploy**, e pronto: você ganha um link que qualquer
-aplicativo OpenAI-compatible consegue usar.
+Pick a model, click **Deploy**, and you get a link any OpenAI-compatible app can
+use.
 
 ---
 
-## Requisitos
+## Requirements
 
-| Sistema | O que precisa |
+| System | What you need |
 |---|---|
-| **Windows** | [WSL](https://learn.microsoft.com/pt-br/windows/wsl/install) instalado e aberto (Ubuntu recomendado) |
-| **Linux** | Terminal — nada mais |
-| **macOS** | Terminal — nada mais |
+| **Windows** | [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) installed and open (Ubuntu recommended) |
+| **Linux** | A terminal — nothing else |
+| **macOS** | A terminal — nothing else |
 
-> **GPU NVIDIA?** Melhor ainda: o SursumAI detecta sozinho e usa o **vLLM** pra máxima
-> performance (precisa do [Docker Desktop](https://www.docker.com/products/docker-desktop/)).
-> Sem GPU NVIDIA, ele usa o `llama-server` — que roda em qualquer máquina, inclusive
-> em imagens (VLM). Você não precisa decidir nada.
+> **NVIDIA GPU?** Even better: SursumAI detects it automatically and uses
+> **vLLM** for maximum performance (requires [Docker Desktop](https://www.docker.com/products/docker-desktop/)).
+> Without an NVIDIA GPU, it uses `llama-server` — which runs on any machine,
+> including vision models (VLM). You never have to decide.
 
-## Como rodar (primeira vez)
+## Install (first time)
 
-Dentro do terminal (WSL no Windows, Terminal no Linux/Mac):
-
-```bash
-git clone https://github.com/Ga0512/sursumai.git
-cd sursumai
-bash start.sh
-```
-
-Pronto. Na primeira vez o `start.sh` prepara tudo sozinho (Python, dependências e
-checagens) e abre o browser em `http://localhost:3000`.
-
-> **Em breve:** instalação de 1 comando estilo Ollama — `curl -fsSL <url> | bash` —
-> sem precisar de `git` ou de clonar nada.
-
-## Usar de novo
+Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-bash start.sh
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/main/install.sh | bash
 ```
 
-O comando faz tudo: mantém seus deployments salvos e sobe os 3 serviços (Web, Central,
-Agent). Se aparecer um aviso sobre Docker, leia a seção abaixo.
+That's it. The installer does everything automatically:
+- downloads SursumAI (no git needed)
+- sets up Python and dependencies
+- puts the `sursumai` command on your PATH
+- adds a desktop icon (and a shortcut on the Windows desktop if you're on WSL)
+- optionally installs Docker (so your NVIDIA GPU can be used)
+- starts the app and opens the browser at `http://localhost:3000`
 
-## Como funciona
+> Already on a dev setup? `git clone https://github.com/Ga0512/SursumAI.git && bash start.sh` works too.
 
-1. Crie sua conta (email + senha).
-2. Clique **+ New**, escolha um modelo entre os providers (Qwen, Kimi, DeepSeek,
+## Use again
+
+```bash
+sursumai          # starts everything and opens the browser
+sursumai status   # are the services running?
+sursumai stop     # stop the services (model deployments keep running)
+```
+
+Or double-click the **SursumAI** icon in your app menu / Windows desktop.
+
+## How it works
+
+1. Create an account (email + password).
+2. Click **+ New**, pick a model from the providers (Qwen, Kimi, DeepSeek,
    Llama, Mistral, Bonsai).
-3. Clique **Deploy**. O SursumAI valida sua máquina, baixa o modelo e te dá a URL.
-4. Use a URL em qualquer app OpenAI (Python, JavaScript, curl) — tem snippets prontos
-   no botão **Details** de cada deployment.
+3. Click **Deploy**. SursumAI checks your machine, downloads the model, and
+   gives you the URL.
+4. Use the URL from any OpenAI-compatible app (Python, JavaScript, curl) —
+   ready-made snippets are in the **Details** button of each deployment.
 
-### O que o SursumAI escolhe por você
+### What SursumAI decides for you
 
-- **Runtime** — vLLM se sua máquina tem GPU NVIDIA + Docker; `llama-server` caso
-  contrário. O seletor fica visível no modal, mas você não precisa mexer.
-- **Formato do modelo** — providers mostram modelos **safetensors** (para vLLM) e
-  modelos **GGUF** (para `llama-server`), filtrados conforme o runtime escolhido.
-- **Portas e chaves** — resolvidas e escondidas automaticamente.
-- **Modelos vision** — se o modelo aceita imagens (Qwen-VL, Bonsai, etc.), o tab
-  **Test** ganha um botão **Image** pra você enviar uma foto junto do texto.
+- **Runtime** — vLLM if you have an NVIDIA GPU + Docker; `llama-server`
+  otherwise. The selector is visible in the modal, but you never have to touch it.
+- **Model format** — providers show **safetensors** models (for vLLM) and
+  **GGUF** models (for `llama-server`), filtered by the chosen runtime.
+- **Ports and keys** — resolved and hidden automatically.
+- **Vision models** — if the model accepts images (Qwen-VL, Bonsai, etc.), the
+  **Test** tab gets an **Image** button so you can send a photo along with text.
 
-### Providers de modelo
+### vLLM vs llama-server
+
+| | vLLM | llama-server |
+|---|---|---|
+| **Best for** | Production / real traffic — external clients, high concurrency, GPU serving | Individual use or a small team on one machine |
+| **Performance** | Highest throughput, production-grade batching | Lower throughput, but starts fast and runs anywhere |
+| **Requires** | NVIDIA GPU + Docker | Nothing (CPU works; GPU via Docker optional) |
+| **Examples** | Serving a model as an API for your product | Personal assistant, experimenting, private/team models |
+
+### Model providers
 
 | Provider | Safetensors (vLLM) | GGUF (llama-server) |
 |---|---|---|
@@ -79,33 +92,46 @@ Agent). Se aparecer um aviso sobre Docker, leia a seção abaixo.
 | **Mistral** | Mistral Small/Medium/Large | Mistral Small 24B |
 | **Bonsai** | — | Bonsai 8B, 4B, 1.7B, 27B (1-bit) |
 
-## Docker (opcional, mas recomendado pra GPU)
+## CLI
 
-O vLLM (GPU NVIDIA) roda dentro do Docker. Se o SursumAI avisar que o Docker não
-está rodando:
+Everything you can do in the web UI, you can do from a terminal:
 
-1. Instale o **Docker Desktop**: https://www.docker.com/products/docker-desktop/
-2. No Windows, abra as configurações do Docker e habilite a integração com WSL.
-3. Rode `bash start.sh` de novo.
+```bash
+sursumai login <email>                  # store your token (prompts for password)
+sursumai list                           # table of deployments
+sursumai deploy <org/model>             # GGUF names auto-detect llama-server
+sursumai logs <id> --tail 300           # tail a deployment's log
+sursumai destroy <id> --yes             # remove a deployment
+```
 
-Sem Docker, o SursumAI continua funcionando com o `llama-server` nativo (CPU).
+## Docker (optional, recommended for GPU)
 
-## Se algo der errado
+vLLM (NVIDIA GPU) runs inside Docker. The installer can set it up for you; you
+can also install it manually:
 
-- **"Could not reach server"** — os serviços não estão rodando. Verifique com
-  `bash start.sh`.
-- **Deploy ficou `failed`** — abra os **Logs** do deployment no card; a mensagem
-  explica o problema em linguagem simples.
-- **Modelo não aparece** — alguns modelos no Hugging Face exigem aceitar a licença.
-  Use um dos modelos da lista que já estão liberados.
+1. Install **Docker Desktop**: https://www.docker.com/products/docker-desktop/
+2. On Windows, open Docker settings and enable WSL integration.
+3. Run `sursumai` again.
 
-Logs completos dos serviços: `/tmp/opencode/{agent,central,web}.log`.
+**No Docker?** SursumAI still works using the native `llama-server` (CPU).
+If you have an NVIDIA GPU but no Docker, deployments fall back to CPU and tell
+you so — install Docker later to unlock the GPU.
 
-## Portas usadas
+## Troubleshooting
 
-| Serviço | Porta |
+- **"Could not reach server"** — the services aren't running. Run `sursumai`.
+- **Deploy stuck in `failed`** — open the **Logs** of the deployment card; the
+  message explains the problem in plain language.
+- **Model not showing up** — some Hugging Face models require accepting a
+  license. Use one of the listed models (already cleared).
+
+Service logs: `/tmp/opencode/{agent,central,web}.log`.
+
+## Ports
+
+| Service | Port |
 |---|---|
-| Web (interface) | 3000 |
-| Backend Central | 8001 |
-| Local Agent | 8010 |
+| Web (UI) | 3000 |
+| Central backend | 8001 |
+| Local agent | 8010 |
 | Deployments | 9000–9099 |

@@ -68,6 +68,19 @@ def _gpu_available() -> bool:
         return False
 
 
+def _runtime_strategy() -> str:
+    """docker when an NVIDIA GPU and Docker are both present; otherwise the
+    native binary (CPU). A GPU without Docker falls back to CPU with a warning
+    instead of failing — installing Docker unlocks the GPU later."""
+    if not _gpu_available():
+        return "binary"
+    try:
+        _docker_info()
+        return "docker"
+    except TransportError:
+        return "binary-cpu-fallback"
+
+
 # ---- docker helpers ----
 
 def _docker_info() -> None:
@@ -323,12 +336,19 @@ def resolve_model(spec: Spec) -> dict:
 def preflight(spec: Spec) -> list[dict]:
     """Return structured checks. Never raises: each check is a dict with ok/name/detail."""
     checks: list[dict] = []
-    strategy = "docker" if _gpu_available() else "binary"
-    checks.append({
-        "name": "strategy", "ok": True,
-        "detail": f"runtime llama-server via {strategy}" +
-                  ("" if strategy == "binary" else " (NVIDIA GPU detected)"),
-    })
+    strategy = _runtime_strategy()
+    gpu = _gpu_available()
+
+    if strategy == "docker":
+        checks.append({
+            "name": "strategy", "ok": True,
+            "detail": "running via Docker (NVIDIA GPU detected — best performance)",
+        })
+    else:
+        detail = "running via native llama.cpp binary (CPU)"
+        if gpu:
+            detail += " — NVIDIA GPU detected but Docker is not available, so the GPU can't be used. Install Docker to unlock it."
+        checks.append({"name": "strategy", "ok": True, "detail": detail})
 
     if strategy == "docker":
         try:
@@ -471,7 +491,7 @@ def start(spec: Spec, deploy_id: str) -> str:
     _log(deploy_id, f"=== model: {resolved['model']} ({'VLM' if resolved['vision'] else 'LLM'}) ===")
     paths = _download_gguf(spec, resolved, deploy_id)
 
-    if _gpu_available():
+    if _runtime_strategy() == "docker":
         _docker_info()
         if _image_present():
             _log(deploy_id, f"=== using local image {IMAGE} ===")
@@ -485,7 +505,10 @@ def start(spec: Spec, deploy_id: str) -> str:
         _log(deploy_id, "=== container started, following container logs ===")
         _follow_logs(deploy_id)
     else:
-        _log(deploy_id, "=== no NVIDIA GPU — using native llama.cpp binary ===")
+        if _gpu_available():
+            _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using CPU fallback ===")
+        else:
+            _log(deploy_id, "=== no NVIDIA GPU — using native llama.cpp binary ===")
         exe = _ensure_binary()
         cmd = _binary_build_cmd(spec, deploy_id, paths, exe)
         _log(deploy_id, ">>> " + " ".join(cmd))
@@ -533,6 +556,8 @@ def _friendly_stage(marker: str) -> str:
         return "starting inference server"
     if "no nvidia gpu" in marker:
         return "running on CPU (no NVIDIA GPU)"
+    if "docker is not available" in marker:
+        return "running on CPU (GPU detected, but Docker is not installed)"
     if "model:" in marker:
         return "preparing model"
     return marker

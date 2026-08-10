@@ -713,6 +713,8 @@ function fmtInt(n) {
 const playHistory = [];
 let playImageData = null;
 let playIsVision = false;
+let playController = null;
+let playStreaming = false;
 
 function enablePlayground(d) {
   document.getElementById("playInput").disabled = false;
@@ -786,31 +788,92 @@ async function sendPlay() {
     : text;
   removePlayImage();
   const sendBtn = document.getElementById("playSend");
+  const stopBtn = document.getElementById("playStop");
   sendBtn.disabled = true;
+  stopBtn.classList.remove("hidden");
+  playStreaming = true;
+  playController = new AbortController();
   try {
     const res = await fetch(`${API}/deploys/${detailId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ messages: [{ role: "user", content }], max_tokens: 2048 }),
+      body: JSON.stringify({ messages: [{ role: "user", content }], max_tokens: 2048, stream: true }),
+      signal: playController.signal,
     });
-    const data = await res.json();
-    if (!res.ok) { addPlayMsg("error", `<div class="content">${escapeHtml(data.detail || "Request failed")}</div>`); return; }
-    const c = data.choices && data.choices[0];
-    if (!c) { addPlayMsg("error", `<div class="content">Empty response</div>`); return; }
-    let html = "";
-    if (c.message && c.message.reasoning_content) {
-      html += `<div class="think">${escapeHtml(c.message.reasoning_content)}</div>`;
+    if (!res.ok) {
+      let detail = "Request failed";
+      try { detail = (await res.json()).detail || detail; } catch {}
+      addPlayMsg("error", `<div class="content">${escapeHtml(detail)}</div>`);
+      return;
     }
-    const content = c.message ? (c.message.content || "(no content)") : "";
-    html += `<div class="content">${escapeHtml(content)}</div>`;
-    const usage = data.usage;
+    // create the assistant bubble up-front so we can fill it token by token
+    const box = document.getElementById("playMessages");
+    const div = document.createElement("div");
+    div.className = "msg assistant";
+    div.innerHTML = '<div class="role">Assistant</div><div class="think hidden"></div><div class="content"></div>';
+    box.appendChild(div);
+    const thinkEl = div.querySelector(".think");
+    const contentEl = div.querySelector(".content");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let usage = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+          try {
+            const obj = JSON.parse(data);
+            if (obj.error) { addPlayMsg("error", `<div class="content">${escapeHtml(obj.error)}</div>`); return; }
+            if (obj.usage) usage = obj.usage;
+            const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
+            if (!delta) continue;
+            if (delta.reasoning_content) {
+              thinkEl.classList.remove("hidden");
+              thinkEl.textContent += delta.reasoning_content;
+            }
+            if (delta.content) contentEl.textContent += delta.content;
+            box.scrollTop = box.scrollHeight;
+          } catch {}
+        }
+      }
+    }
+    if (!contentEl.textContent && thinkEl.classList.contains("hidden")) {
+      contentEl.textContent = "(no content)";
+    }
     const meta = usage ? `${usage.prompt_tokens} in · ${usage.completion_tokens} out` : "";
-    addPlayMsg("assistant", html, meta);
-  } catch {
-    addPlayMsg("error", `<div class="content">Could not reach server</div>`);
+    if (meta) {
+      const m = document.createElement("div");
+      m.className = "meta";
+      m.textContent = meta;
+      div.appendChild(m);
+    }
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      addPlayMsg("assistant", '<div class="content"><em>stopped</em></div>');
+    } else {
+      addPlayMsg("error", `<div class="content">Could not reach server</div>`);
+    }
   } finally {
+    playStreaming = false;
+    playController = null;
+    stopBtn.classList.add("hidden");
     sendBtn.disabled = false;
   }
+}
+
+function stopPlay() {
+  if (playController) playController.abort();
 }
 
 /* ---- code snippets ---- */

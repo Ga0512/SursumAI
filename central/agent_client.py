@@ -75,5 +75,29 @@ def chat(endpoint: str, payload: dict, timeout: float = 180.0) -> dict:
         raise AgentError(f"deploy unreachable at {endpoint}: {e}") from None
 
 
+def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0):
+    """Generator that forwards raw SSE bytes from a streaming chat completion.
+
+    Runs inside the central's threadpool (StreamingResponse), so the blocking
+    urllib loop does not stall the event loop.
+    """
+    url = endpoint.rstrip("/") + "/chat/completions"
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            for line in resp:
+                yield line
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode()).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        yield f'data: {json.dumps({"error": detail or f"HTTP {e.code}"})}\n\n'.encode()
+    except (urllib.error.URLError, OSError) as e:
+        yield f'data: {json.dumps({"error": f"deploy unreachable: {e}"})}\n\n'.encode()
+
+
 def stop(deploy_id: str) -> None:
     _request("POST", f"/deploys/{deploy_id}/stop")

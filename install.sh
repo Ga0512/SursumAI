@@ -109,6 +109,43 @@ else
 fi
 ok "Ambiente pronto."
 
+# --- docker (opcional) ----------------------------------------------------------
+# Docker destrava a GPU (vLLM e llama.cpp com CUDA). Sem ele, SursumAI ainda
+# funciona usando a CPU. Perguntamos e instalamos automaticamente se pudermos.
+ensure_docker() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && return 0
+  if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
+    warn "Docker está instalado mas o daemon não está rodando."
+    echo "  Abra o Docker Desktop e rode o install de novo — ou siga com CPU por enquanto."
+    return 1
+  fi
+
+  echo
+  echo "O Docker não está instalado. Ele é opcional: sem ele o SursumAI roda modelos"
+  echo "na CPU (mais lento) e não usa sua GPU NVIDIA. Com ele, a GPU é usada."
+  printf "Instalar o Docker agora? [y/N] "
+  read -r ans
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "Ok — seguindo sem Docker (CPU). Você pode instalar depois."; return 1 ;;
+  esac
+
+  if [ "$IS_WSL" -eq 1 ] || [ -n "$(command -v apt-get)" ]; then
+    echo "Instalando docker.io via apt (precisa de sudo)…"
+    sudo apt-get update -qq && sudo apt-get install -y -qq docker.io \
+      || fail "não consegui instalar o Docker via apt. Instale manualmente em https://docs.docker.com/engine/install/"
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 \
+      && ok "Docker instalado e rodando." \
+      || { warn "Docker instalado. Inicie o daemon (sudo systemctl start docker) e rode o install de novo."; return 1; }
+  elif [ "$IS_MAC" -eq 1 ]; then
+    warn "No macOS instale o Docker Desktop: https://www.docker.com/products/docker-desktop/"
+    return 1
+  else
+    warn "Instale o Docker manualmente: https://docs.docker.com/engine/install/"
+    return 1
+  fi
+}
+
 # --- CLI no PATH ----------------------------------------------------------------
 mkdir -p "$BIN_DIR"
 ln -sf "$SURSUMAI_DIR/sursumai/bin/sursumai" "$BIN_DIR/sursumai"
@@ -194,6 +231,7 @@ fi
 
 # --- subir -----------------------------------------------------------------------
 echo
+ensure_docker || true
 bold "Subindo o SursumAI…"
 cd "$SURSUMAI_DIR"
 if command -v sursumai >/dev/null 2>&1; then
