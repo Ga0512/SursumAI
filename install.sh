@@ -7,8 +7,8 @@
 # puts `sursumai` on the PATH, adds a desktop icon, and starts everything.
 #
 # Overrides (env):
-#   SURSUMAI_REPO        github repo to fetch the tarball from (default Ga0512/sursumai)
-#   SURSUMAI_VERSION     release tag (default latest)
+#   SURSUMAI_REPO        github repo to fetch the tarball from (default Ga0512/SursumAI)
+#   SURSUMAI_VERSION     branch/tag (default main)
 #   SURSUMAI_TARBALL_URL full tarball URL (takes precedence over repo+version)
 #   SURSUMAI_DIR         install dir (default $HOME/sursumai)
 #   SURSUMAI_SRC_DIR     use a local source dir instead of downloading (dev/testing)
@@ -31,7 +31,7 @@ warn() { printf '\033[33m!\033[0m %s\n' "$*"; }
 fail() { printf '\033[31m✗\033[0m %s\n' "$*"; exit 1; }
 
 echo
-bold "◆ SursumAI — instalador"
+bold "◆ SursumAI — installer"
 echo
 
 # --- detect OS ---------------------------------------------------------------
@@ -41,42 +41,42 @@ case "$(uname -s)" in
   Linux)
     if grep -qi "microsoft" /proc/version 2>/dev/null; then IS_WSL=1; fi
     ;;
-  *) fail "sistema operacional não suportado: $(uname -s)" ;;
+  *) fail "unsupported operating system: $(uname -s)" ;;
 esac
 
-command -v curl >/dev/null 2>&1 || fail "curl não encontrado. Instale o curl primeiro."
-command -v tar  >/dev/null 2>&1 || fail "tar não encontrado."
+command -v curl >/dev/null 2>&1 || fail "curl not found. Install curl first."
+command -v tar  >/dev/null 2>&1 || fail "tar not found."
 
-# --- código (tarball sem git) --------------------------------------------------
+# --- code (tarball, no git) ----------------------------------------------------
 mkdir -p "$SURSUMAI_DIR"
 
 if [ -n "$SURSUMAI_SRC_DIR" ]; then
-  ok "Usando código local: $SURSUMAI_SRC_DIR"
+  ok "Using local source: $SURSUMAI_SRC_DIR"
   cp -a "$SURSUMAI_SRC_DIR"/. "$SURSUMAI_DIR"/
 else
-  echo "Baixando SursumAI $SURSUMAI_VERSION …"
+  echo "Downloading SursumAI $SURSUMAI_VERSION …"
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
   curl -fsSL "$SURSUMAI_TARBALL_URL" -o "$TMP/sursumai.tar.gz" \
-    || fail "falha ao baixar $SURSUMAI_TARBALL_URL"
+    || fail "failed to download $SURSUMAI_TARBALL_URL"
   mkdir -p "$TMP/src"
   tar -xzf "$TMP/sursumai.tar.gz" -C "$TMP/src"
-  # tarballs do GitHub trazem um diretório-raiz (ex: sursumai-1.0) — normaliza
+  # GitHub tarballs include a root dir (e.g. sursumai-1.0) — normalize it
   INNER="$(find "$TMP/src" -maxdepth 2 -name start.sh -printf '%h\n' | head -1)"
   SOURCE="${INNER:-$TMP/src}"
   cp -a "$SOURCE"/. "$SURSUMAI_DIR"/
-  ok "Código em $SURSUMAI_DIR"
+  ok "Code installed to $SURSUMAI_DIR"
 fi
 
 cd "$SURSUMAI_DIR"
 
-# --- python: uv preferido -------------------------------------------------------
+# --- python: uv preferred -------------------------------------------------------
 ensure_uv() {
   command -v uv >/dev/null 2>&1 && return 0
   if [ "$IS_WSL" -eq 1 ] || [ "$IS_MAC" -eq 1 ] || [ -n "$(command -v apt-get)" ]; then
-    echo "Instalando uv…"
+    echo "Installing uv…"
     curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 \
-      || warn "não consegui instalar o uv (vou tentar python3)"
+      || warn "could not install uv (will try python3)"
   fi
   command -v uv >/dev/null 2>&1
 }
@@ -84,69 +84,69 @@ ensure_uv() {
 PY=""
 if ensure_uv; then
   export PATH="$HOME/.local/bin:$PATH"
-  ok "uv disponível."
+  ok "uv available."
   if [ ! -x "$SURSUMAI_DIR/.venv/bin/python" ]; then
-    echo "Criando ambiente (uv venv)…"
+    echo "Creating virtual environment (uv venv)…"
     uv venv --python 3.11 .venv >/dev/null 2>&1 || uv venv .venv >/dev/null \
-      || fail "não consegui criar o ambiente virtual"
+      || fail "could not create the virtual environment"
   fi
   PY="$SURSUMAI_DIR/.venv/bin/python"
-  echo "Instalando dependências (uv pip)…"
+  echo "Installing dependencies (uv pip)…"
   uv pip install --python "$PY" -q -r requirements.txt || \
     "$PY" -m pip install --quiet -r requirements.txt || \
-    fail "não consegui instalar as dependências"
+    fail "could not install dependencies"
 else
   PYBIN="$(command -v python3 || command -v python || true)"
-  [ -n "$PYBIN" ] || fail "nenhum Python 3 encontrado. Instale Python 3.10+ ou uv."
-  ok "Usando Python do sistema ($PYBIN)."
+  [ -n "$PYBIN" ] || fail "no Python 3 found. Install Python 3.10+ or uv."
+  ok "Using system Python ($PYBIN)."
   if [ ! -x "$SURSUMAI_DIR/.venv/bin/python" ]; then
-    "$PYBIN" -m venv .venv || fail "não consegui criar o ambiente virtual"
+    "$PYBIN" -m venv .venv || fail "could not create the virtual environment"
   fi
   PY="$SURSUMAI_DIR/.venv/bin/python"
   "$PY" -m pip install --quiet --upgrade pip
   "$PY" -m pip install --quiet -r requirements.txt || \
-    fail "não consegui instalar as dependências"
+    fail "could not install dependencies"
 fi
-ok "Ambiente pronto."
+ok "Environment ready."
 
-# --- docker (opcional) ----------------------------------------------------------
-# Docker destrava a GPU (vLLM e llama.cpp com CUDA). Sem ele, SursumAI ainda
-# funciona usando a CPU. Perguntamos e instalamos automaticamente se pudermos.
+# --- docker (optional) ----------------------------------------------------------
+# Docker unlocks the GPU (vLLM and llama.cpp with CUDA). Without it, SursumAI
+# still works on CPU. We ask and install automatically when possible.
 ensure_docker() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && return 0
   if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
-    warn "Docker está instalado mas o daemon não está rodando."
-    echo "  Abra o Docker Desktop e rode o install de novo — ou siga com CPU por enquanto."
+    warn "Docker is installed but the daemon is not running."
+    echo "  Open Docker Desktop and run the installer again — or keep going on CPU for now."
     return 1
   fi
 
   echo
-  echo "O Docker não está instalado. Ele é opcional: sem ele o SursumAI roda modelos"
-  echo "na CPU (mais lento) e não usa sua GPU NVIDIA. Com ele, a GPU é usada."
-  printf "Instalar o Docker agora? [y/N] "
+  echo "Docker is not installed. It is optional: without it SursumAI runs models"
+  echo "on CPU (slower) and won't use your NVIDIA GPU. With it, the GPU is used."
+  printf "Install Docker now? [y/N] "
   read -r ans
   case "$ans" in
     y|Y|yes|YES) ;;
-    *) echo "Ok — seguindo sem Docker (CPU). Você pode instalar depois."; return 1 ;;
+    *) echo "Ok — continuing without Docker (CPU). You can install it later."; return 1 ;;
   esac
 
   if [ "$IS_WSL" -eq 1 ] || [ -n "$(command -v apt-get)" ]; then
-    echo "Instalando docker.io via apt (precisa de sudo)…"
+    echo "Installing docker.io via apt (requires sudo)…"
     sudo apt-get update -qq && sudo apt-get install -y -qq docker.io \
-      || fail "não consegui instalar o Docker via apt. Instale manualmente em https://docs.docker.com/engine/install/"
+      || fail "could not install Docker via apt. Install it manually: https://docs.docker.com/engine/install/"
     command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 \
-      && ok "Docker instalado e rodando." \
-      || { warn "Docker instalado. Inicie o daemon (sudo systemctl start docker) e rode o install de novo."; return 1; }
+      && ok "Docker installed and running." \
+      || { warn "Docker installed. Start the daemon (sudo systemctl start docker) and run the installer again."; return 1; }
   elif [ "$IS_MAC" -eq 1 ]; then
-    warn "No macOS instale o Docker Desktop: https://www.docker.com/products/docker-desktop/"
+    warn "On macOS install Docker Desktop: https://www.docker.com/products/docker-desktop/"
     return 1
   else
-    warn "Instale o Docker manualmente: https://docs.docker.com/engine/install/"
+    warn "Install Docker manually: https://docs.docker.com/engine/install/"
     return 1
   fi
 }
 
-# --- CLI no PATH ----------------------------------------------------------------
+# --- CLI on PATH ----------------------------------------------------------------
 mkdir -p "$BIN_DIR"
 ln -sf "$SURSUMAI_DIR/sursumai/bin/sursumai" "$BIN_DIR/sursumai"
 chmod +x "$SURSUMAI_DIR/sursumai/bin/sursumai"
@@ -163,9 +163,9 @@ else
   [ -f "$HOME/.zshrc" ] && add_path "$HOME/.zshrc"
 fi
 export PATH="$BIN_DIR:$PATH"
-ok "Comando 'sursumai' no PATH ($BIN_DIR)."
+ok "Command 'sursumai' on PATH ($BIN_DIR)."
 
-# --- ícone no desktop ------------------------------------------------------------
+# --- desktop icon ---------------------------------------------------------------
 ICON_SRC="$SURSUMAI_DIR/assets/sursumai-logo.svg"
 
 if [ "$IS_MAC" -eq 1 ]; then
@@ -190,10 +190,10 @@ EOF
 </dict>
 </plist>
 EOF
-  ok "Atalho em ~/Applications/SursumAI.app"
+  ok "Shortcut at ~/Applications/SursumAI.app"
 
 elif [ "$IS_WSL" -eq 1 ]; then
-  # atalho no Desktop do Windows
+  # shortcut on the Windows Desktop
   WIN_PROFILE="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r' | sed 's/ *$//')"
   if [ -n "$WIN_PROFILE" ]; then
     DESKTOP="$(wslpath -u "$WIN_PROFILE\\Desktop")" 2>/dev/null || DESKTOP=""
@@ -202,12 +202,12 @@ elif [ "$IS_WSL" -eq 1 ]; then
 @echo off
 wsl -e bash -lc "$BIN_DIR/sursumai --ui"
 EOF
-      ok "Atalho no Desktop do Windows: sursumai.bat"
+      ok "Shortcut on the Windows Desktop: sursumai.bat"
     fi
   fi
 fi
 
-# ícone do menu Linux (sempre, também no WSL)
+# Linux menu icon (always, also on WSL)
 if [ "$IS_MAC" -eq 0 ]; then
   ICON_DIR="$HOME/.local/share/icons"
   APP_DIR="$HOME/.local/share/applications"
@@ -217,7 +217,7 @@ if [ "$IS_MAC" -eq 0 ]; then
 [Desktop Entry]
 Type=Application
 Name=SursumAI
-Comment=Seu modelo. Sua máquina. Sua URL.
+Comment=Your model. Your machine. Your URL.
 Exec=$BIN_DIR/sursumai --ui
 Icon=$ICON_DIR/sursumai.svg
 Terminal=false
@@ -226,13 +226,13 @@ EOF
   chmod +x "$APP_DIR/sursumai.desktop"
   command -v update-desktop-database >/dev/null 2>&1 && \
     update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
-  ok "Ícone no menu de aplicativos."
+  ok "Icon added to the applications menu."
 fi
 
-# --- subir -----------------------------------------------------------------------
+# --- launch -----------------------------------------------------------------------
 echo
 ensure_docker || true
-bold "Subindo o SursumAI…"
+bold "Starting SursumAI…"
 cd "$SURSUMAI_DIR"
 if command -v sursumai >/dev/null 2>&1; then
   sursumai --ui
@@ -241,6 +241,6 @@ else
 fi
 
 echo
-ok "Instalação concluída. Próximos passos:"
+ok "Installation complete. Next steps:"
 echo "  • Terminal:  sursumai status"
-echo "  • Ícone:     SursumAI no menu de aplicativos"
+echo "  • Icon:      SursumAI in the applications menu"
