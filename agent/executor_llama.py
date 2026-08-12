@@ -68,17 +68,41 @@ def _gpu_available() -> bool:
         return False
 
 
-def _runtime_strategy() -> str:
-    """docker when an NVIDIA GPU and Docker are both present; otherwise the
-    native binary (CPU). A GPU without Docker falls back to CPU with a warning
-    instead of failing — installing Docker unlocks the GPU later."""
-    if not _gpu_available():
-        return "binary"
+def _docker_here() -> bool:
     try:
         _docker_info()
-        return "docker"
+        return True
     except TransportError:
-        return "binary-cpu-fallback"
+        return False
+
+
+def _runtime_strategy() -> str:
+    """docker when an NVIDIA GPU and Docker are both present; Vulkan when an
+    NVIDIA GPU is present but Docker is missing and a Vulkan ICD is installed;
+    CPU otherwise."""
+    if not _gpu_available():
+        return "binary"
+    if _docker_here():
+        return "docker"
+    if platform.system() == "Linux" and _vulkan_loader():
+        return "vulkan"
+    return "binary-cpu-fallback"
+
+
+def _vulkan_loader() -> bool:
+    """True when a Vulkan runtime is reachable (libvulkan + an ICD exposing a
+    GPU). On WSL2 the NVIDIA driver ships a Vulkan ICD automatically."""
+    import ctypes.util
+
+    lib = ctypes.util.find_library("vulkan")
+    if not lib:
+        return False
+    try:
+        with open("/usr/share/vulkan/icd.d", "r"):
+            pass
+    except OSError:
+        return False
+    return True
 
 
 # ---- docker helpers ----
@@ -149,6 +173,8 @@ def _platform_key() -> str:
     if system == "Darwin":
         return f"macos-{arch}"
     if system == "Linux":
+        if _runtime_strategy() == "vulkan":
+            return f"ubuntu-vulkan-{arch}"
         return f"ubuntu-{arch}"
     if system == "Windows":
         return f"win-cpu-{arch}"
@@ -344,10 +370,15 @@ def preflight(spec: Spec) -> list[dict]:
             "name": "strategy", "ok": True,
             "detail": "running via Docker (NVIDIA GPU detected — best performance)",
         })
+    elif strategy == "vulkan":
+        checks.append({
+            "name": "strategy", "ok": True,
+            "detail": "running via native llama.cpp binary using GPU (Vulkan) — Docker not available",
+        })
     else:
         detail = "running via native llama.cpp binary (CPU)"
         if gpu:
-            detail += " — NVIDIA GPU detected but Docker is not available, so the GPU can't be used. Install Docker to unlock it."
+            detail += " — NVIDIA GPU detected but neither Docker nor a Vulkan runtime is available, so the GPU can't be used. Install Docker or upgrade the NVIDIA WSL driver to unlock it."
         checks.append({"name": "strategy", "ok": True, "detail": detail})
 
     if strategy == "docker":
@@ -469,6 +500,8 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
     ]
+    if _runtime_strategy() == "vulkan":
+        cmd += ["-ngl", "999"]
     if paths.get("mmproj"):
         cmd += ["--mmproj", paths["mmproj"]]
     return cmd
@@ -505,7 +538,9 @@ def start(spec: Spec, deploy_id: str) -> str:
         _log(deploy_id, "=== container started, following container logs ===")
         _follow_logs(deploy_id)
     else:
-        if _gpu_available():
+        if _runtime_strategy() == "vulkan":
+            _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using GPU via Vulkan ===")
+        elif _gpu_available():
             _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using CPU fallback ===")
         else:
             _log(deploy_id, "=== no NVIDIA GPU — using native llama.cpp binary ===")
@@ -558,6 +593,8 @@ def _friendly_stage(marker: str) -> str:
         return "running on CPU (no NVIDIA GPU)"
     if "docker is not available" in marker:
         return "running on CPU (GPU detected, but Docker is not installed)"
+    if "via vulkan" in marker:
+        return "running on GPU via Vulkan (no Docker)"
     if "model:" in marker:
         return "preparing model"
     return marker

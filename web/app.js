@@ -1,4 +1,4 @@
-const API = "http://localhost:8001";
+const API = "/api";
 
 let selectedTarget = "local";
 let selectedRuntime = "vllm";
