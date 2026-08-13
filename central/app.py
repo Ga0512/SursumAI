@@ -249,6 +249,15 @@ async def meta_capabilities():
         return {"gpu": False, "docker": False, "recommended_runtime": "llama"}
 
 
+@app.get("/meta/model_fit")
+async def meta_model_fit(model: str, runtime: str = "llama"):
+    """Proxy the agent's VRAM/model fit suggestion for the deploy form."""
+    try:
+        return await asyncio.to_thread(agent_client.model_fit, model, runtime)
+    except agent_client.AgentError:
+        return {"ok": False, "reason": "unavailable"}
+
+
 # ---- auth ----
 
 @app.post("/auth/register", status_code=201)

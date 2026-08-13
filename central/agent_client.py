@@ -48,6 +48,11 @@ def capabilities() -> dict:
     return _request("GET", "/capabilities")
 
 
+def model_fit(model: str, runtime: str) -> dict:
+    from urllib.parse import quote
+    return _request("GET", f"/model_fit?model={quote(model)}&runtime={runtime}")
+
+
 def logs(deploy_id: str, tail: int = 300) -> str:
     return _request("GET", f"/deploys/{deploy_id}/logs?tail={tail}").get("logs", "")
 

@@ -241,8 +241,10 @@ function pickProvider(key) {
     el.addEventListener("click", () => {
       list.querySelectorAll(".model-static").forEach((x) => x.classList.remove("selected"));
       el.classList.add("selected");
+      const prev = input.value;
       input.value = el.dataset.model;
       if (el.dataset.runtime && el.dataset.runtime !== selectedRuntime) setRuntimeForModel(el.dataset.runtime);
+      applyFit(prev);
     });
   });
   input.value = keep;
@@ -370,8 +372,31 @@ async function openRedeploy(id) {
   document.getElementById("modal").classList.remove("hidden");
 }
 
+async function applyFit(prevModel) {
+  const input = document.getElementById("f_model");
+  const model = input.value.trim();
+  if (!model || model === prevModel) return;
+  const hint = document.getElementById("f_model_hint");
+  try {
+    const res = await fetch(`${API}/meta/model_fit?model=${encodeURIComponent(model)}&runtime=${selectedRuntime}`);
+    const fit = await res.json();
+    if (!fit.ok || fit.fits === false) {
+      hint.textContent = fit.message || "Selected model — customize configuration below if you like.";
+      return;
+    }
+    if (!fit.suggest) { hint.textContent = "Selected model — customize configuration below if you like."; return; }
+    document.getElementById("f_mem").value = fit.suggest.gpu_memory_utilization;
+    document.getElementById("f_len").value = fit.suggest.max_model_len;
+    const gb = (fit.weights_mb / 1024).toFixed(1);
+    hint.textContent = `${model} needs ~${gb}GB VRAM for weights; suggested config below is editable.`;
+  } catch {
+    hint.textContent = "Selected model — customize configuration below if you like.";
+  }
+}
+
 function setModelField(model) {
   const input = document.getElementById("f_model");
+  const prev = input.value;
   for (const [key, p] of Object.entries(PROVIDERS)) {
     const m = p.models.find((m) => m.id === model);
     if (m) {
@@ -383,11 +408,13 @@ function setModelField(model) {
       document.querySelectorAll(".model-static").forEach((el) => {
         el.classList.toggle("selected", el.dataset.model === model);
       });
+      applyFit(prev);
       return;
     }
   }
   pickProvider("custom");
   input.value = model;
+  applyFit(prev);
 }
 
 /* ---- dashboard ---- */
