@@ -56,7 +56,7 @@ Or double-click the **SursumAI** icon in your app menu / Windows desktop.
 
 1. Create an account (email + password).
 2. Click **+ New**, pick a model from the providers (Qwen, Kimi, DeepSeek,
-   Llama, Mistral, Bonsai).
+   Muse-Glimmer, Mistral, Bonsai).
 3. Click **Deploy**. SursumAI checks your machine, downloads the model, and
    gives you the URL.
 4. Use the URL from any OpenAI-compatible app (Python, JavaScript, curl) —
@@ -88,7 +88,7 @@ Or double-click the **SursumAI** icon in your app menu / Windows desktop.
 | **Qwen** | Qwen3.6, Qwen3-VL… | Qwen3 30B MoE, 8B, VL-8B, 4B, 1.7B, 0.6B |
 | **Kimi** | Kimi-K3, K2.6, K2.5, VL… | Kimi-K2 |
 | **DeepSeek** | DeepSeek-V4… | R1 Distill 8B, 1.5B |
-| **Llama** | Llama-4 Scout/Maverick | Llama-4 Scout, 3.3-70B |
+| **Muse-Glimmer** | Muse Glimmer 30B | Muse Glimmer 30B |
 | **Mistral** | Mistral Small/Medium/Large | Mistral Small 24B |
 | **Bonsai** | — | Bonsai 8B, 4B, 1.7B, 27B (1-bit) |
 

@@ -92,12 +92,21 @@ def _image_present() -> bool:
         return False
 
 
-def _gpu_available() -> bool:
+def _gpu_count() -> int:
     try:
-        result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=10)
-        return result.returncode == 0
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return 0
+        return len([l for l in result.stdout.decode(errors="replace").splitlines() if l.strip()])
     except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
+        return 0
+
+
+def _gpu_available() -> bool:
+    return _gpu_count() > 0
 
 
 def _hf_files(model: str) -> list[str] | None:
@@ -139,6 +148,14 @@ def preflight(spec: Spec) -> list[dict]:
         checks.append({"name": "gpu", "ok": True, "detail": "NVIDIA GPU available"})
     else:
         checks.append({"name": "gpu", "ok": False, "detail": "no NVIDIA GPU — vLLM requires CUDA"})
+
+    count = _gpu_count()
+    if count and spec.gpus > count:
+        checks.append({
+            "name": "gpu_count",
+            "ok": False,
+            "detail": f"{spec.gpus} GPUs requested but only {count} found — vLLM cannot start with more tensor-parallel GPUs than the machine has.",
+        })
 
     if _image_present():
         checks.append({"name": "image", "ok": True, "detail": f"image cached ({IMAGE})"})

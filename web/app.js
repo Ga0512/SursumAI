@@ -181,12 +181,10 @@ const PROVIDERS = {
     ],
   },
   llama: {
-    name: "Llama",
+    name: "Muse-Glimmer",
     models: [
-      { id: "meta-llama/Llama-4-Scout-17B-16E-Instruct", tag: "Efficient · 2025", runtime: "vllm" },
-      { id: "meta-llama/Llama-4-Maverick-17B-128E-Instruct", tag: "Flagship · 2025", runtime: "vllm" },
-      { id: "unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF", tag: "Scout · GGUF", runtime: "llama" },
-      { id: "unsloth/Llama-3.3-70B-Instruct-GGUF", tag: "3.3 · 70B · GGUF", runtime: "llama" },
+      { id: "meta-models/Muse-Glimmer-30B", tag: "Muse · 2026", runtime: "vllm" },
+      { id: "meta-models/Muse-Glimmer-30B-GGUF", tag: "Muse · GGUF", runtime: "llama" },
     ],
   },
   mistral: {
@@ -313,7 +311,6 @@ async function openModal() {
   document.getElementById("f_model").value = "";
   document.getElementById("f_hf_token").value = "";
   document.getElementById("f_gpus").value = 1;
-  document.getElementById("f_nodes").value = 1;
   document.getElementById("f_mem").value = 0.5;
   document.getElementById("f_len").value = 300;
   document.getElementById("f_tokens").value = 2048;
@@ -365,7 +362,6 @@ async function openRedeploy(id) {
   setTarget(s.target || "local");
   setRuntime(s.runtime || "vllm");
   document.getElementById("f_gpus").value = s.gpus || 1;
-  document.getElementById("f_nodes").value = s.nodes || 1;
   document.getElementById("f_mem").value = s.gpu_memory_utilization || 0.5;
   document.getElementById("f_len").value = s.max_model_len || 300;
   document.getElementById("f_tokens").value = s.max_tokens || 2048;
@@ -561,7 +557,6 @@ async function deploy() {
     runtime: selectedRuntime,
     target: selectedTarget,
     gpus: parseInt(document.getElementById("f_gpus").value, 10) || 1,
-    nodes: parseInt(document.getElementById("f_nodes").value, 10) || 1,
     gpu_memory_utilization: parseFloat(document.getElementById("f_mem").value) || 0.5,
     max_model_len: parseInt(document.getElementById("f_len").value, 10) || 300,
     max_tokens: parseInt(document.getElementById("f_tokens").value, 10) || 2048,
