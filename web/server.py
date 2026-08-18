@@ -18,6 +18,10 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
     Keeps the browser on a single origin (the web server) so the UI works even
     when the whole app is served through a proxy on a different host/machine.
 
+    Streaming (SSE) requires HTTP/1.1 + Transfer-Encoding: chunked — HTTP/1.0
+    close-delimited responses make browsers buffer until EOF (the whole reply
+    arrives at once instead of token by token).
+
     Returns True if the request was proxied (matched /api), False otherwise.
     """
     target = central_url.rstrip("/") + path[4:]  # strip leading "/api"
@@ -36,31 +40,42 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
             headers.send_response(status)
             headers.send_header("Content-Type", ctype)
             headers.send_header("Cache-Control", "no-cache")
+            headers.send_header("Connection", "close")
+            headers.send_header("Transfer-Encoding", "chunked")
             headers.end_headers()
             while True:
                 chunk = upstream.read(65536)
                 if not chunk:
                     break
                 try:
-                    headers.wfile.write(chunk)
+                    headers.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
+                    headers.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     break
-            headers.wfile.flush()
+            try:
+                headers.wfile.write(b"0\r\n\r\n")
+                headers.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
     except urllib.error.HTTPError as e:
         payload = e.read()
         headers.send_response(e.code)
         headers.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
+        headers.send_header("Content-Length", str(len(payload)))
         headers.end_headers()
         headers.wfile.write(payload)
     except urllib.error.URLError as e:
         message = f"backend unreachable: {e.reason}".encode()
         headers.send_response(502)
         headers.send_header("Content-Type", "application/json")
+        headers.send_header("Content-Length", str(len(message)))
         headers.end_headers()
         headers.wfile.write(message)
 
 
 class ProxyHandler(http.server.SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def _maybe_proxy(self, method: str):
         if self.path.startswith("/api"):
             _forward(self, CENTRAL_URL, method, self.path)

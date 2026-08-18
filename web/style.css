@@ -387,6 +387,9 @@ body {
 
 /* --- playground --- */
 .play-area { display: flex; flex-direction: column; gap: 12px; }
+.play-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.play-hint { color: #7d879c; font-size: 0.78rem; }
+.play-clear { flex-shrink: 0; font-size: 0.78rem; }
 .play-messages {
   display: flex; flex-direction: column; gap: 10px;
   background: rgba(17,20,30,0.92); border-radius: 14px; padding: 16px;
@@ -477,6 +480,9 @@ body {
 
 /* --- playground --- */
 .play-area { display: flex; flex-direction: column; gap: 12px; }
+.play-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.play-hint { color: #7d879c; font-size: 0.78rem; }
+.play-clear { flex-shrink: 0; font-size: 0.78rem; }
 .play-messages {
   display: flex; flex-direction: column; gap: 10px;
   background: rgba(17,20,30,0.92); border-radius: 14px;

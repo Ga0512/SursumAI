@@ -808,6 +808,7 @@ async function sendPlay() {
         { type: "image_url", image_url: { url: playImageData } },
       ]
     : text;
+  playHistory.push({ role: "user", content });
   removePlayImage();
   const sendBtn = document.getElementById("playSend");
   const stopBtn = document.getElementById("playStop");
@@ -819,7 +820,7 @@ async function sendPlay() {
     const res = await fetch(`${API}/deploys/${detailId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ messages: [{ role: "user", content }], max_tokens: 2048, stream: true }),
+      body: JSON.stringify({ messages: playHistory, max_tokens: 2048, stream: true }),
       signal: playController.signal,
     });
     if (!res.ok) {
@@ -872,7 +873,13 @@ async function sendPlay() {
     if (!contentEl.textContent && thinkEl.classList.contains("hidden")) {
       contentEl.textContent = "(no content)";
     }
-    const meta = usage ? `${usage.prompt_tokens} in · ${usage.completion_tokens} out` : "";
+    if (contentEl.textContent) {
+      playHistory.push({ role: "assistant", content: contentEl.textContent });
+    }
+    const ctx = usage ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) : 0;
+    const meta = usage
+      ? `memória da conversa: ${ctx} tokens no total (KV cache) — o modelo lembra de tudo que você disse`
+      : "";
     if (meta) {
       const m = document.createElement("div");
       m.className = "meta";
@@ -896,6 +903,12 @@ async function sendPlay() {
 
 function stopPlay() {
   if (playController) playController.abort();
+}
+
+function clearPlay() {
+  playHistory.length = 0;
+  document.getElementById("playMessages").innerHTML =
+    '<div class="play-empty">Memory cleared — the model forgot this conversation.</div>';
 }
 
 /* ---- code snippets ---- */

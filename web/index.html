@@ -210,6 +210,10 @@
       <!-- ===== Test (playground) ===== -->
       <div id="tab-test" class="tab-pane">
         <div class="play-area">
+          <div class="play-head">
+            <span class="play-hint">The model remembers this conversation (KV cache). New chat clears its memory.</span>
+            <button class="btn btn-ghost play-clear" onclick="clearPlay()">New chat</button>
+          </div>
           <div id="playMessages" class="play-messages">
             <div class="play-empty">Send a message to test this model.</div>
           </div>
