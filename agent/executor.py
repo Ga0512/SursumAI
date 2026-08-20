@@ -53,6 +53,7 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--gpu-memory-utilization", str(spec.gpu_memory_utilization),
         "--max-model-len", str(spec.max_model_len),
         "--tensor-parallel-size", str(spec.gpus),
+        "--enable-prefix-caching",
     ]
     return cmd
 

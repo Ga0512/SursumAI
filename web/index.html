@@ -62,10 +62,39 @@
     </nav>
     <div class="dash">
       <div class="dash-head">
-        <h2>Deployments</h2>
-        <button class="btn btn-primary" onclick="openModal()">+ New</button>
+        <div class="dash-tabs">
+          <button class="dash-tab active" data-view="deploys" onclick="switchDash('deploys')">Deployments</button>
+          <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Chat</button>
+        </div>
+        <div>
+          <button class="btn btn-ghost hidden" id="poolBtn" onclick="openPoolModal()">+ Pool</button>
+          <button class="btn btn-primary" onclick="openModal()">+ New</button>
+        </div>
       </div>
-      <div id="sursumaiGrid" class="sursum-grid"></div>
+      <div id="deploysView">
+        <div id="sursumaiGrid" class="sursum-grid"></div>
+      </div>
+      <div id="chatView" class="hidden">
+        <div class="chat-area">
+          <div class="chat-head">
+            <div class="chat-pool-row">
+              <label>Pool</label>
+              <select id="chatPool" class="input" onchange="chatPoolChanged()"></select>
+              <span class="chat-hint">Messages are routed automatically to the best model.</span>
+            </div>
+            <button class="btn btn-ghost" onclick="newChat()">New chat</button>
+          </div>
+          <div id="chatMessages" class="chat-messages">
+            <div class="play-empty">Pick a pool and start chatting. The router picks the model.</div>
+          </div>
+          <div class="chat-input-row">
+            <textarea id="chatInput" class="input play-input" rows="2" placeholder="Type a message…"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}" disabled></textarea>
+            <button class="btn btn-primary" id="chatSend" onclick="sendChat()" disabled>Send</button>
+            <button class="btn btn-danger play-stop hidden" id="chatStop" onclick="stopChat()">Stop</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -248,6 +277,36 @@
           <pre class="code-block" id="codeBlock"></pre>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ======= POOL MODAL ======= -->
+  <div id="poolModal" class="overlay hidden" onclick="if(event.target===this) closePoolModal()">
+    <div class="modal glass">
+      <div class="modal-head">
+        <div>
+          <h3>New pool</h3>
+          <p class="modal-sub">A pool routes each message to the right model automatically.</p>
+        </div>
+        <button class="modal-close" onclick="closePoolModal()" aria-label="Close">✕</button>
+      </div>
+      <div class="field">
+        <label>Pool name</label>
+        <input id="p_name" class="input" placeholder="e.g. Default" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Weak model <span class="opt">(handles most messages)</span></label>
+        <select id="p_weak" class="input"></select>
+      </div>
+      <div class="field">
+        <label>Strong model <span class="opt">(for hard questions)</span></label>
+        <select id="p_strong" class="input"></select>
+      </div>
+      <div class="field">
+        <label>Judge <span class="opt">(optional — decides when to escalate; uses weak if empty)</span></label>
+        <select id="p_judge" class="input"><option value="">—</option></select>
+      </div>
+      <button id="poolBtnSubmit" class="btn btn-primary" style="width:100%" onclick="createPool()">Create pool</button>
     </div>
   </div>
 

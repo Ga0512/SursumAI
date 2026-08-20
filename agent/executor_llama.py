@@ -492,6 +492,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "-n", str(spec.max_tokens),
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
+        "--cache-reuse", "1",
     ]
     if paths.get("mmproj"):
         cmd += ["--mmproj", f"/models/{Path(paths['mmproj']).name}"]
@@ -509,6 +510,7 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
         "-n", str(spec.max_tokens),
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
+        "--cache-reuse", "1",
     ]
     if _runtime_strategy() == "vulkan":
         cmd += ["-ngl", "999"]

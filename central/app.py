@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
+import uuid
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -14,7 +16,8 @@ from core import metrics
 from core.spec import Spec, SpecError
 from . import agent_client
 from . import auth as authmod
-from .db import DeployState, Store
+from . import router as router_mod
+from .db import DeployState, Pool, RouterSession, Store
 
 app = FastAPI(title="SursumAI Central")
 store = Store()
@@ -71,6 +74,22 @@ class ChatRequest(BaseModel):
     max_tokens: int = 512
     temperature: float | None = None
     stream: bool = False
+
+
+class PoolRequest(BaseModel):
+    name: str
+    weak_id: str
+    strong_id: str
+    judge_id: str | None = None
+
+
+class RouterChatRequest(BaseModel):
+    model: str = "router"
+    messages: list[dict]
+    max_tokens: int = 512
+    temperature: float | None = None
+    stream: bool = False
+    session_id: str | None = None
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -408,3 +427,170 @@ async def destroy_deploy(deploy_id: str, user=Depends(_current_user)):
         pass
     store.delete(deploy_id)
     return {"status": "deleted"}
+
+
+# ---- pools (model routing) ----
+
+def _get_owned_pool(pool_id: str, user_id: str) -> Pool:
+    pool = store.get_pool(pool_id)
+    if pool is None or pool.user_id != user_id:
+        raise HTTPException(status_code=404, detail="pool not found")
+    return pool
+
+
+def _check_pool_members(pool: Pool, user_id: str) -> None:
+    for deploy_id in (pool.weak_id, pool.strong_id, pool.judge_id):
+        if not deploy_id:
+            continue
+        deploy = store.get(deploy_id)
+        if deploy is None or deploy.user_id != user_id:
+            raise HTTPException(status_code=422, detail=f"deploy {deploy_id} not found")
+        if deploy.status != DeployState.HEALTHY or not deploy.endpoint:
+            raise HTTPException(status_code=422, detail=f"deploy {deploy_id} is not healthy")
+
+
+@app.get("/pools")
+async def list_pools(user=Depends(_current_user)):
+    return [p.to_dict() for p in store.list_pools(user.id)]
+
+
+@app.post("/pools", status_code=201)
+async def create_pool(req: PoolRequest, user=Depends(_current_user)):
+    if req.weak_id == req.strong_id:
+        raise HTTPException(status_code=422, detail="weak and strong must be different deploys")
+    pool = store.create_pool(user.id, req.name, req.weak_id, req.strong_id, req.judge_id)
+    try:
+        _check_pool_members(pool, user.id)
+    except HTTPException:
+        store.delete_pool(pool.id)
+        raise
+    return pool.to_dict()
+
+
+@app.delete("/pools/{pool_id}")
+async def destroy_pool(pool_id: str, user=Depends(_current_user)):
+    _get_owned_pool(pool_id, user.id)
+    store.delete_pool(pool_id)
+    return {"status": "deleted"}
+
+
+@app.get("/pools/{pool_id}/log")
+async def pool_log(pool_id: str, user=Depends(_current_user)):
+    _get_owned_pool(pool_id, user.id)
+    return store.list_router_log(pool_id=pool_id)
+
+
+# ---- OpenAI-compatible router endpoint ----
+
+def _openai_chunk(created: int, model: str, content: str | None = None,
+                  finish: str | None = None) -> dict:
+    delta: dict = {"role": "assistant"}
+    if content is not None:
+        delta["content"] = content
+    chunk: dict = {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    }
+    return chunk
+
+
+def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
+                        user_id: str, messages: list[dict], created: int,
+                        max_tokens: int, temperature: float | None):
+    try:
+        outcome = router_mod.route_turn(
+            store, pool, session, user_id, messages, max_tokens, temperature,
+        )
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        return
+    served_model = pool.name
+    if outcome["decision"] == "weak_ok":
+        served_model = f"{pool.name} (weak)"
+    elif outcome["decision"] == "escalated":
+        served_model = f"{pool.name} (strong)"
+    elif outcome["decision"] == "latched":
+        served_model = f"{pool.name} (strong, latched)"
+    content = outcome["content"]
+    for piece in (content[: i + 80] for i in range(0, len(content), 80)):
+        yield f"data: {json.dumps(_openai_chunk(created, served_model, piece))}\n\n"
+    final = _openai_chunk(created, served_model, finish="stop")
+    final["usage"] = outcome["usage"]
+    final["session_id"] = session.id
+    final["choices"][0]["delta"] = {}
+    yield f"data: {json.dumps(final)}\n\n"
+    yield "data: [DONE]\n\n"
+    store.log_router(session.id, pool.id, user_id, outcome["served"],
+                     outcome["decision"], outcome["usage"].get("total_tokens", 0), 0)
+
+
+def _resolve_pool(user: object, model: str) -> Pool:
+    if model == "router":
+        pools = store.list_pools(user.id)
+        if not pools:
+            raise HTTPException(status_code=422, detail="no pool configured")
+        return pools[0]
+    pool = store.get_pool(model)
+    if pool is None or pool.user_id != user.id:
+        raise HTTPException(status_code=404, detail=f"pool '{model}' not found")
+    return pool
+
+
+@app.post("/v1/chat/completions")
+async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
+    """OpenAI-compatible router endpoint. model="router" uses the user's
+    default pool; model="<pool_id>" targets a specific pool."""
+    if not req.messages:
+        raise HTTPException(status_code=422, detail="messages required")
+    pool = _resolve_pool(user, req.model)
+    session_id = req.session_id or uuid.uuid4().hex
+    session = store.get_router_session(session_id)
+    if session is None or session.pool_id != pool.id or session.user_id != user.id:
+        session = RouterSession(id=session_id, pool_id=pool.id, user_id=user.id)
+        store.upsert_router_session(session)
+    created = int(time.time())
+    if req.stream:
+        return StreamingResponse(
+            _iter_router_stream(store, pool, session, user.id, req.messages,
+                                created, req.max_tokens, req.temperature),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    try:
+        outcome = await asyncio.to_thread(
+            router_mod.route_turn, store, pool, session, user.id, req.messages,
+            req.max_tokens, req.temperature,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    store.log_router(session.id, pool.id, user.id, outcome["served"],
+                     outcome["decision"], outcome["usage"].get("total_tokens", 0), 0)
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": created,
+        "model": f"{pool.name} ({outcome['decision']})",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": outcome["content"]},
+                     "finish_reason": "stop"}],
+        "usage": outcome["usage"],
+        "session_id": session.id,
+    }
+
+
+@app.get("/v1/models")
+async def router_models(user=Depends(_current_user)):
+    pools = store.list_pools(user.id)
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "router",
+                "object": "model",
+                "owned_by": "sursumai",
+                "pool": p.to_dict(),
+            } for p in pools
+        ],
+    }

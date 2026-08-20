@@ -87,6 +87,54 @@ class Deploy:
         }
 
 
+class Pool:
+    def __init__(self, user_id: str, name: str, weak_id: str, strong_id: str,
+                 judge_id: str | None = None, id: str | None = None,
+                 created_at: str | None = None):
+        self.id = id or uuid.uuid4().hex
+        self.user_id = user_id
+        self.name = name
+        self.weak_id = weak_id
+        self.strong_id = strong_id
+        self.judge_id = judge_id
+        self.created_at = created_at or _now()
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "weak_id": self.weak_id,
+            "strong_id": self.strong_id,
+            "judge_id": self.judge_id,
+            "created_at": self.created_at,
+        }
+
+
+class RouterSession:
+    def __init__(self, id: str, pool_id: str, user_id: str, latched: bool = False,
+                 streak: int = 0, created_at: str | None = None,
+                 updated_at: str | None = None):
+        self.id = id
+        self.pool_id = pool_id
+        self.user_id = user_id
+        self.latched = latched
+        self.streak = streak
+        self.created_at = created_at or _now()
+        self.updated_at = updated_at or self.created_at
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "pool_id": self.pool_id,
+            "user_id": self.user_id,
+            "latched": self.latched,
+            "streak": self.streak,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class Store:
     def __init__(self, path: Path = DB_PATH):
         self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -144,6 +192,51 @@ class Store:
                 deploy_id TEXT NOT NULL,
                 ts REAL NOT NULL,
                 payload TEXT NOT NULL
+            )
+            """
+        )
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(pools)")]
+        if not cols:
+            self._conn.execute(
+                """
+                CREATE TABLE pools (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    weak_id TEXT NOT NULL,
+                    strong_id TEXT NOT NULL,
+                    judge_id TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(router_sessions)")]
+        if not cols:
+            self._conn.execute(
+                """
+                CREATE TABLE router_sessions (
+                    id TEXT PRIMARY KEY,
+                    pool_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    latched INTEGER NOT NULL DEFAULT 0,
+                    streak INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS router_log (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                pool_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                model_served TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -293,3 +386,92 @@ class Store:
             updated_at=row["updated_at"],
             error=row["error"],
         )
+
+    # ---- pools ----
+
+    def create_pool(self, user_id: str, name: str, weak_id: str, strong_id: str,
+                    judge_id: str | None = None) -> Pool:
+        pool = Pool(user_id=user_id, name=name, weak_id=weak_id, strong_id=strong_id,
+                    judge_id=judge_id)
+        self._conn.execute(
+            "INSERT INTO pools (id, user_id, name, weak_id, strong_id, judge_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (pool.id, pool.user_id, pool.name, pool.weak_id, pool.strong_id, pool.judge_id,
+             pool.created_at),
+        )
+        self._conn.commit()
+        return pool
+
+    def get_pool(self, id: str) -> Pool | None:
+        row = self._conn.execute("SELECT * FROM pools WHERE id = ?", (id,)).fetchone()
+        return self._pool_from_row(row) if row else None
+
+    def list_pools(self, user_id: str) -> list[Pool]:
+        rows = self._conn.execute(
+            "SELECT * FROM pools WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+        ).fetchall()
+        return [self._pool_from_row(r) for r in rows]
+
+    def delete_pool(self, id: str) -> None:
+        self._conn.execute("DELETE FROM pools WHERE id = ?", (id,))
+        self._conn.commit()
+
+    def _pool_from_row(self, row: sqlite3.Row) -> Pool:
+        return Pool(
+            id=row["id"], user_id=row["user_id"], name=row["name"],
+            weak_id=row["weak_id"], strong_id=row["strong_id"], judge_id=row["judge_id"],
+            created_at=row["created_at"],
+        )
+
+    # ---- router sessions ----
+
+    def get_router_session(self, id: str) -> RouterSession | None:
+        row = self._conn.execute("SELECT * FROM router_sessions WHERE id = ?", (id,)).fetchone()
+        return self._router_session_from_row(row) if row else None
+
+    def upsert_router_session(self, session: RouterSession) -> None:
+        session.updated_at = _now()
+        self._conn.execute(
+            """
+            INSERT INTO router_sessions (id, pool_id, user_id, latched, streak, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                latched=excluded.latched,
+                streak=excluded.streak,
+                updated_at=excluded.updated_at
+            """,
+            (session.id, session.pool_id, session.user_id, int(session.latched),
+             session.streak, session.created_at, session.updated_at),
+        )
+        self._conn.commit()
+
+    def _router_session_from_row(self, row: sqlite3.Row) -> RouterSession:
+        return RouterSession(
+            id=row["id"], pool_id=row["pool_id"], user_id=row["user_id"],
+            latched=bool(row["latched"]), streak=row["streak"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    # ---- router log ----
+
+    def log_router(self, session_id: str, pool_id: str, user_id: str, model_served: str,
+                   decision: str, tokens: int = 0, latency_ms: int = 0) -> None:
+        self._conn.execute(
+            "INSERT INTO router_log (id, session_id, pool_id, user_id, model_served, decision, tokens, latency_ms, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, session_id, pool_id, user_id, model_served, decision,
+             tokens, latency_ms, _now()),
+        )
+        self._conn.commit()
+
+    def list_router_log(self, pool_id: str | None = None, limit: int = 50) -> list[dict]:
+        if pool_id:
+            rows = self._conn.execute(
+                "SELECT * FROM router_log WHERE pool_id = ? ORDER BY created_at DESC LIMIT ?",
+                (pool_id, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM router_log ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
