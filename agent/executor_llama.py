@@ -90,16 +90,19 @@ def _runtime_strategy() -> str:
 
 
 def _vulkan_loader() -> bool:
-    """True when a Vulkan runtime is reachable (libvulkan + an ICD exposing a
-    GPU). On WSL2 the NVIDIA driver ships a Vulkan ICD automatically."""
+    """True when a Vulkan runtime is really reachable: libvulkan is loadable
+    AND at least one ICD file exists. Without an ICD the GPU can't be used,
+    so we must not claim Vulkan is available (the binary would fail at runtime)."""
     import ctypes.util
 
-    lib = ctypes.util.find_library("vulkan")
-    if not lib:
+    if not ctypes.util.find_library("vulkan"):
         return False
+    icd_dir = Path("/usr/share/vulkan/icd.d")
     try:
-        with open("/usr/share/vulkan/icd.d", "r"):
-            pass
+        if not icd_dir.is_dir():
+            return False
+        if not any(icd_dir.glob("*.json")):
+            return False
     except OSError:
         return False
     return True
@@ -371,10 +374,17 @@ def preflight(spec: Spec) -> list[dict]:
             "detail": "running via Docker (NVIDIA GPU detected — best performance)",
         })
     elif strategy == "vulkan":
-        checks.append({
-            "name": "strategy", "ok": True,
-            "detail": "running via native llama.cpp binary using GPU (Vulkan) — Docker not available",
-        })
+        if _vulkan_loader():
+            checks.append({
+                "name": "strategy", "ok": True,
+                "detail": "running via native llama.cpp binary using GPU (Vulkan) — Docker not available",
+            })
+        else:
+            checks.append({
+                "name": "strategy", "ok": False,
+                "detail": "GPU detected but the Vulkan runtime is missing (no libvulkan1 or no Vulkan ICD). "
+                "Install the Vulkan loader (e.g. 'sudo apt install libvulkan1' + your vendor's ICD) or enable Docker.",
+            })
     else:
         detail = "running via native llama.cpp binary (CPU)"
         if gpu:
