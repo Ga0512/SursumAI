@@ -1143,6 +1143,7 @@ async function sendChat() {
           try {
             const obj = JSON.parse(data);
             if (obj.error) { addChatMsg("error", `<div class="content">${escapeHtml(obj.error)}</div>`); return; }
+            if (obj.session_id) chatSessionId = obj.session_id;
             servedModel = obj.model || servedModel;
             const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
             if (delta && delta.content) contentEl.textContent += delta.content;

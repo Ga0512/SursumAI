@@ -542,18 +542,46 @@ def _resolve_pool(user: object, model: str) -> Pool:
     return pool
 
 
+SESSION_TTL_SECONDS = 3600
+SESSION_ID_MAX = 128
+
+
+def _session_expired(session: RouterSession) -> bool:
+    try:
+        from datetime import datetime
+        updated = datetime.fromisoformat(session.updated_at)
+        if updated.tzinfo is None:
+            from datetime import timezone
+            updated = updated.replace(tzinfo=timezone.utc)
+        age = time.time() - updated.timestamp()
+        return age > SESSION_TTL_SECONDS
+    except Exception:
+        return False
+
+
 @app.post("/v1/chat/completions")
 async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
     """OpenAI-compatible router endpoint. model="router" uses the user's
-    default pool; model="<pool_id>" targets a specific pool."""
+    default pool; model="<pool_id>" targets a specific pool.
+
+    session_id may be any stable string (e.g. "harness:meu-pipeline"); the
+    central keeps the routing state (streak/latch) under that key, scoped to
+    the user + pool. Sessions expire after inactivity (latch resets)."""
     if not req.messages:
         raise HTTPException(status_code=422, detail="messages required")
+    if req.session_id is not None and len(req.session_id) > SESSION_ID_MAX:
+        raise HTTPException(status_code=422, detail="session_id too long")
     pool = _resolve_pool(user, req.model)
     session_id = req.session_id or uuid.uuid4().hex
     session = store.get_router_session(session_id)
     if session is None or session.pool_id != pool.id or session.user_id != user.id:
         session = RouterSession(id=session_id, pool_id=pool.id, user_id=user.id)
         store.upsert_router_session(session)
+    elif _session_expired(session):
+        session.streak = 0
+        session.latched = False
+        store.upsert_router_session(session)
+    store.touch_router_session(session.id)
     created = int(time.time())
     if req.stream:
         return StreamingResponse(

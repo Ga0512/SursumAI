@@ -472,6 +472,19 @@ class Store:
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
+    def touch_router_session(self, id: str) -> None:
+        self._conn.execute(
+            "UPDATE router_sessions SET updated_at = ? WHERE id = ?", (_now(), id)
+        )
+        self._conn.commit()
+
+    def reset_router_session(self, id: str) -> None:
+        self._conn.execute(
+            "UPDATE router_sessions SET streak = 0, latched = 0, updated_at = ? WHERE id = ?",
+            (_now(), id),
+        )
+        self._conn.commit()
+
     # ---- router log ----
 
     def log_router(self, session_id: str, pool_id: str, user_id: str, model_served: str,
