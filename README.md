@@ -11,6 +11,19 @@ use.
 
 ---
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Landing](docs/screenshots/01-landing.png) | ![Dashboard](docs/screenshots/02-dashboard.png) |
+| **Landing** — one-click self-hosting | **Dashboard** — your deployments, health and metrics |
+| ![Detail metrics](docs/screenshots/03-detail-metrics.png) | ![Playground](docs/screenshots/04-playground.png) |
+| **Details** — metrics, test and code snippets | **Playground** — chat with the model (vision supported) |
+| ![Chat](docs/screenshots/05-chat.png) | ![Pool modal](docs/screenshots/06-pool-modal.png) |
+| **Chat** — the router picks the best model per message | **Pool** — team up 2+ models; the router decides between them |
+
+---
+
 ## Requirements
 
 | System | What you need |
@@ -80,6 +93,27 @@ Or double-click the **SursumAI** icon in your app menu / Windows desktop.
 | **Performance** | Highest throughput, production-grade batching | Lower throughput, but starts fast and runs anywhere |
 | **Requires** | NVIDIA GPU + Docker | Nothing (CPU works; GPU via Docker optional) |
 | **Examples** | Serving a model as an API for your product | Personal assistant, experimenting, private/team models |
+
+### Router — the model team
+
+Instead of picking one model, create a **pool** of 2+ deployments and let the
+router decide who answers each message (OpenAI-style: `POST /v1/chat/completions`
+with `model="router"`). Every answer says which model served it.
+
+| Mode | How it decides | Extra latency |
+|---|---|---|
+| `escalation` | Weak answers; a judge LLM escalates to the strong model when needed; after 2 escalations the session latches to strong | Judge call per message |
+| `classifier` | A judge reads the question and picks the single best model among N (NVIDIA-style `llm_classifier`) | One judge call |
+| `advisor` | Weak answers instantly; the judge runs in the background for the next turn | None |
+| `stage` | Keyword rules (code, math, theory → strong) — no LLM | None |
+| `round_robin` | Alternates models per turn | None |
+
+**Session memory:** send a stable `session_id` (e.g. `harness:meu-pipeline`) and
+the router keeps per-conversation state (streak/latch) — no bookkeeping needed;
+it expires after 1h of inactivity. Without it, routing still works per message.
+
+**NVIDIA GPU without Docker?** SursumAI detects `libcuda` and runs a native
+CUDA build of llama-server on your GPU (no Vulkan, no Docker required).
 
 ### Model providers
 
