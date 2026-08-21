@@ -30,6 +30,12 @@ LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "llama-models"
 BIN_DIR = Path(__file__).resolve().parent.parent / "llama-bin"
 BIN_VERSION = "b10327"  # pinned llama.cpp release (security: no silent upgrade)
+# The official llama.cpp releases ship no CUDA build for Linux. The
+# PrismML fork (the Bonsai model vendor) publishes pinned CUDA builds for
+# Linux (CUDA 12.4/12.8) that also support the 1-bit Q1_0 GGUF format.
+BIN_CUDA_REPO = "PrismML-Eng/llama.cpp"
+BIN_CUDA_TAG = "prism-b9570-0ad1dab"
+BIN_CUDA_ASSET = "llama-prism-b9570-0ad1dab-bin-linux-cuda-12.8-x64.tar.gz"
 BIN_REPO = "ggml-org/llama.cpp"
 BIN_API = f"https://api.github.com/repos/{BIN_REPO}/releases/tags/{BIN_VERSION}"
 DEFAULT_QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "Q4_0", "Q1_0"]
@@ -77,29 +83,44 @@ def _docker_here() -> bool:
 
 
 def _runtime_strategy() -> str:
-    """docker when an NVIDIA GPU and Docker are both present; Vulkan when an
-    NVIDIA GPU is present but Docker is missing and a Vulkan ICD is installed;
-    CPU otherwise."""
+    """docker when an NVIDIA GPU and Docker are both present; CUDA when an
+    NVIDIA GPU is present, Docker is missing and libcuda is loadable; Vulkan
+    when an NVIDIA GPU is present but neither Docker nor libcuda exist and a
+    Vulkan ICD is installed; CPU otherwise."""
     if not _gpu_available():
         return "binary"
     if _docker_here():
         return "docker"
+    if _cuda_available():
+        return "cuda"
     if platform.system() == "Linux" and _vulkan_loader():
         return "vulkan"
     return "binary-cpu-fallback"
 
 
-def _vulkan_loader() -> bool:
-    """True when a Vulkan runtime is reachable (libvulkan + an ICD exposing a
-    GPU). On WSL2 the NVIDIA driver ships a Vulkan ICD automatically."""
+def _cuda_available() -> bool:
+    """True when libcuda is reachable: the NVIDIA driver (incl. WSL) exposes
+    libcuda.so.1, which is all a CUDA build needs at runtime. No toolkit
+    required. Without it the CUDA binary would fail at startup."""
     import ctypes.util
 
-    lib = ctypes.util.find_library("vulkan")
-    if not lib:
+    return ctypes.util.find_library("cuda") is not None
+
+
+def _vulkan_loader() -> bool:
+    """True when a Vulkan runtime is really reachable: libvulkan is loadable
+    AND at least one ICD file exists. Without an ICD the GPU can't be used,
+    so we must not claim Vulkan is available (the binary would fail at runtime)."""
+    import ctypes.util
+
+    if not ctypes.util.find_library("vulkan"):
         return False
+    icd_dir = Path("/usr/share/vulkan/icd.d")
     try:
-        with open("/usr/share/vulkan/icd.d", "r"):
-            pass
+        if not icd_dir.is_dir():
+            return False
+        if not any(icd_dir.glob("*.json")):
+            return False
     except OSError:
         return False
     return True
@@ -173,6 +194,8 @@ def _platform_key() -> str:
     if system == "Darwin":
         return f"macos-{arch}"
     if system == "Linux":
+        if _runtime_strategy() == "cuda":
+            return "ubuntu-cuda-x64"
         if _runtime_strategy() == "vulkan":
             return f"ubuntu-vulkan-{arch}"
         return f"ubuntu-{arch}"
@@ -181,17 +204,35 @@ def _platform_key() -> str:
     raise TransportError(f"unsupported platform: {system} {machine}")
 
 
+def _bin_version() -> str:
+    return BIN_CUDA_TAG if _runtime_strategy() == "cuda" else BIN_VERSION
+
+
+def _bin_repo() -> str:
+    """The official llama.cpp releases ship no CUDA build for Linux; the
+    PrismML fork (the Bonsai model vendor) publishes pinned CUDA builds for
+    Linux. Falls back to the official repo for every other strategy."""
+    if _runtime_strategy() == "cuda":
+        return BIN_CUDA_REPO
+    return BIN_REPO
+
+
 def _asset_name() -> str:
     key = _platform_key()
+    if key == "ubuntu-cuda-x64":
+        return BIN_CUDA_ASSET
     if key.startswith("win-"):
-        return f"llama-{BIN_VERSION}-bin-{key}.zip"
-    return f"llama-{BIN_VERSION}-bin-{key}.tar.gz"
+        return f"llama-{_bin_version()}-bin-{key}.zip"
+    return f"llama-{_bin_version()}-bin-{key}.tar.gz"
 
 
 def _release_sha256() -> str:
     """Fetch the official sha256 digest for the pinned asset from the GitHub API."""
+    repo = _bin_repo()
     try:
-        with urllib.request.urlopen(BIN_API, timeout=30) as resp:
+        with urllib.request.urlopen(
+            f"https://api.github.com/repos/{repo}/releases/tags/{_bin_version()}", timeout=30
+        ) as resp:
             data = json.load(resp)
     except Exception as e:
         raise TransportError(f"could not reach llama.cpp releases: {e}") from None
@@ -201,7 +242,7 @@ def _release_sha256() -> str:
             digest = asset.get("digest", "")
             if digest.startswith("sha256:"):
                 return digest.split(":", 1)[1]
-    raise TransportError(f"release {BIN_VERSION} has no asset {wanted!r}")
+    raise TransportError(f"release {_bin_version()} has no asset {wanted!r}")
 
 
 def _sha256(path: Path) -> str:
@@ -214,10 +255,12 @@ def _sha256(path: Path) -> str:
 
 def _binary_path() -> Path:
     key = _platform_key()
-    dirname = f"llama-{BIN_VERSION}-bin-{key}"
+    if key == "ubuntu-cuda-x64":
+        return BIN_DIR / "llama-prism-b9570-0ad1dab" / "llama-server"
+    dirname = f"llama-{_bin_version()}-bin-{key}"
     if key.startswith("win-"):
         return BIN_DIR / dirname / "llama-server.exe"
-    return BIN_DIR / dirname / f"llama-{BIN_VERSION}" / "llama-server"
+    return BIN_DIR / dirname / f"llama-{_bin_version()}" / "llama-server"
 
 
 def _ensure_binary() -> str:
@@ -229,7 +272,8 @@ def _ensure_binary() -> str:
 
     asset = _asset_name()
     archive = BIN_DIR / asset
-    url = f"https://github.com/{BIN_REPO}/releases/download/{BIN_VERSION}/{asset}"
+    repo = _bin_repo()
+    url = f"https://github.com/{repo}/releases/download/{_bin_version()}/{asset}"
     expected = _release_sha256()
 
     if archive.exists():
@@ -251,7 +295,10 @@ def _ensure_binary() -> str:
             f"checksum mismatch for llama.cpp binary (got {actual[:12]}…, expected {expected[:12]}…) — refusing to run"
         )
 
-    dirname = BIN_DIR / f"llama-{BIN_VERSION}-bin-{_platform_key()}"
+    if _platform_key() == "ubuntu-cuda-x64":
+        dirname = BIN_DIR  # the PrismML tarball already contains llama-prism-b9570-0ad1dab/
+    else:
+        dirname = BIN_DIR / f"llama-{_bin_version()}-bin-{_platform_key()}"
     dirname.mkdir(parents=True, exist_ok=True)
     if str(archive).endswith(".zip"):
         with zipfile.ZipFile(archive) as zf:
@@ -370,11 +417,29 @@ def preflight(spec: Spec) -> list[dict]:
             "name": "strategy", "ok": True,
             "detail": "running via Docker (NVIDIA GPU detected — best performance)",
         })
+    elif strategy == "cuda":
+        if _cuda_available():
+            checks.append({
+                "name": "strategy", "ok": True,
+                "detail": "running via native llama.cpp binary using GPU (CUDA) — Docker not available",
+            })
+        else:
+            checks.append({
+                "name": "strategy", "ok": False,
+                "detail": "GPU detected but libcuda is not reachable. Install the NVIDIA driver or enable Docker.",
+            })
     elif strategy == "vulkan":
-        checks.append({
-            "name": "strategy", "ok": True,
-            "detail": "running via native llama.cpp binary using GPU (Vulkan) — Docker not available",
-        })
+        if _vulkan_loader():
+            checks.append({
+                "name": "strategy", "ok": True,
+                "detail": "running via native llama.cpp binary using GPU (Vulkan) — Docker not available",
+            })
+        else:
+            checks.append({
+                "name": "strategy", "ok": False,
+                "detail": "GPU detected but the Vulkan runtime is missing (no libvulkan1 or no Vulkan ICD). "
+                "Install the Vulkan loader (e.g. 'sudo apt install libvulkan1' + your vendor's ICD) or enable Docker.",
+            })
     else:
         detail = "running via native llama.cpp binary (CPU)"
         if gpu:
@@ -482,6 +547,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "-n", str(spec.max_tokens),
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
+        "--cache-reuse", "1",
     ]
     if paths.get("mmproj"):
         cmd += ["--mmproj", f"/models/{Path(paths['mmproj']).name}"]
@@ -499,8 +565,9 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
         "-n", str(spec.max_tokens),
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
+        "--cache-reuse", "1",
     ]
-    if _runtime_strategy() == "vulkan":
+    if _runtime_strategy() in ("vulkan", "cuda"):
         cmd += ["-ngl", "999"]
     if paths.get("mmproj"):
         cmd += ["--mmproj", paths["mmproj"]]
@@ -538,7 +605,9 @@ def start(spec: Spec, deploy_id: str) -> str:
         _log(deploy_id, "=== container started, following container logs ===")
         _follow_logs(deploy_id)
     else:
-        if _runtime_strategy() == "vulkan":
+        if _runtime_strategy() == "cuda":
+            _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using GPU via CUDA ===")
+        elif _runtime_strategy() == "vulkan":
             _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using GPU via Vulkan ===")
         elif _gpu_available():
             _log(deploy_id, "=== NVIDIA GPU detected but Docker is not available — using CPU fallback ===")
@@ -595,6 +664,8 @@ def _friendly_stage(marker: str) -> str:
         return "running on CPU (GPU detected, but Docker is not installed)"
     if "via vulkan" in marker:
         return "running on GPU via Vulkan (no Docker)"
+    if "via cuda" in marker:
+        return "running on GPU via CUDA (no Docker)"
     if "model:" in marker:
         return "preparing model"
     return marker

@@ -982,5 +982,213 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* ---- dashboard tabs (deploys / chat) ---- */
+function switchDash(view) {
+  document.querySelectorAll(".dash-tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.view === view));
+  document.getElementById("deploysView").classList.toggle("hidden", view !== "deploys");
+  document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
+  if (view === "chat") loadChat();
+}
+
+/* ---- pools ---- */
+async function loadPools() {
+  const res = await fetch(`${API}/pools`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function loadChat() {
+  const pools = await loadPools();
+  const sel = document.getElementById("chatPool");
+  const prev = sel.value;
+  sel.innerHTML = pools.length
+    ? pools.map((p) => `<option value="${p.id}">${p.name} (${p.mode || "escalation"})</option>`).join("")
+    : '<option value="">No pools yet</option>';
+  if (prev && pools.some((p) => p.id === prev)) sel.value = prev;
+  const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
+  const hasHealthy = deploys.some((d) => d.status === "healthy");
+  document.getElementById("poolBtn").classList.toggle("hidden", !hasHealthy);
+  const hasPool = pools.length > 0;
+  document.getElementById("chatInput").disabled = !hasPool;
+  document.getElementById("chatSend").disabled = !hasPool;
+  if (!hasPool) {
+    document.getElementById("chatMessages").innerHTML =
+      `<div class="play-empty">Create a pool to start routing. A pool pairs a fast model (weak) with a smarter one (strong).</div>`;
+  }
+}
+
+function chatPoolChanged() {
+  newChat();
+}
+
+let poolHealthyDeploys = [];
+
+async function openPoolModal() {
+  const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
+  const healthy = deploys.filter((d) => d.status === "healthy");
+  if (!healthy.length) { toast("Deploy a model first"); return; }
+  poolHealthyDeploys = healthy;
+  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
+  document.getElementById("p_judge").innerHTML = '<option value="">—</option>' + opts;
+  document.getElementById("p_name").value = "";
+  const box = document.getElementById("p_models");
+  box.innerHTML = "";
+  addPoolModel(healthy[0]?.id);
+  addPoolModel(healthy.length > 1 ? healthy[1].id : healthy[0]?.id);
+  document.getElementById("poolModal").classList.remove("hidden");
+}
+
+function addPoolModel(selectedId) {
+  const opts = poolHealthyDeploys.map((d) =>
+    `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${d.spec.model} (${d.id.slice(0, 8)})</option>`
+  ).join("");
+  const div = document.createElement("div");
+  div.className = "pool-model-row";
+  div.innerHTML = `<select class="input">${opts}</select>
+    <button type="button" class="btn btn-ghost pool-model-remove" title="Remove" onclick="this.parentElement.remove()">✕</button>`;
+  document.getElementById("p_models").appendChild(div);
+}
+
+function closePoolModal() {
+  document.getElementById("poolModal").classList.add("hidden");
+}
+
+async function createPool() {
+  const name = document.getElementById("p_name").value.trim() || "Default";
+  const judge_id = document.getElementById("p_judge").value || null;
+  const mode = document.getElementById("p_mode").value;
+  const model_ids = [...document.querySelectorAll("#p_models select")].map((s) => s.value);
+  if (model_ids.length < 2) { toast("Add at least 2 models"); return; }
+  if (new Set(model_ids).size !== model_ids.length) { toast("Duplicate models in pool"); return; }
+  const res = await fetch(`${API}/pools`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ name, judge_id, mode, model_ids }),
+  });
+  const data = await res.json();
+  if (!res.ok) { toast(data.detail || "Pool creation failed"); return; }
+  closePoolModal();
+  toast("Pool created — the router is ready");
+  loadChat();
+}
+
+/* ---- chat (router) ---- */
+let chatHistory = [];
+let chatSessionId = null;
+let chatController = null;
+
+function addChatMsg(role, html, routeTag, routeClass) {
+  const box = document.getElementById("chatMessages");
+  const empty = box.querySelector(".play-empty");
+  if (empty) empty.remove();
+  const div = document.createElement("div");
+  div.className = `msg ${role === "user" ? "user" : role === "error" ? "error" : "assistant"}`;
+  div.innerHTML = `<div class="role">${role === "user" ? "You" : "Assistant"}</div>${html}` +
+    (routeTag ? `<div class="route-tag ${routeClass || ""}">${routeTag}</div>` : "");
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function newChat() {
+  chatHistory = [];
+  chatSessionId = null;
+  document.getElementById("chatMessages").innerHTML =
+    `<div class="play-empty">New chat. The router will pick the model for each message.</div>`;
+}
+
+async function sendChat() {
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim();
+  const poolId = document.getElementById("chatPool").value;
+  if (!text || !poolId) return;
+  input.value = "";
+  addChatMsg("user", `<div class="content">${escapeHtml(text)}</div>`);
+  chatHistory.push({ role: "user", content: text });
+  const sendBtn = document.getElementById("chatSend");
+  const stopBtn = document.getElementById("chatStop");
+  sendBtn.disabled = true;
+  stopBtn.classList.remove("hidden");
+  chatController = new AbortController();
+  try {
+    const res = await fetch(`${API}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        model: poolId,
+        messages: chatHistory,
+        max_tokens: 2048,
+        stream: true,
+        session_id: chatSessionId || undefined,
+      }),
+      signal: chatController.signal,
+    });
+    if (!res.ok) {
+      let detail = "Request failed";
+      try { detail = (await res.json()).detail || detail; } catch {}
+      addChatMsg("error", `<div class="content">${escapeHtml(detail)}</div>`);
+      return;
+    }
+    const box = document.getElementById("chatMessages");
+    const div = document.createElement("div");
+    div.className = "msg assistant";
+    div.innerHTML = '<div class="role">Assistant</div><div class="content"></div>';
+    box.appendChild(div);
+    const contentEl = div.querySelector(".content");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let servedModel = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+          try {
+            const obj = JSON.parse(data);
+            if (obj.error) { addChatMsg("error", `<div class="content">${escapeHtml(obj.error)}</div>`); return; }
+            if (obj.session_id) chatSessionId = obj.session_id;
+            servedModel = obj.model || servedModel;
+            const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
+            if (delta && delta.content) contentEl.textContent += delta.content;
+            box.scrollTop = box.scrollHeight;
+          } catch {}
+        }
+      }
+    }
+    if (!contentEl.textContent) contentEl.textContent = "(no content)";
+    if (contentEl.textContent) chatHistory.push({ role: "assistant", content: contentEl.textContent });
+    if (servedModel) {
+      const tag = document.createElement("div");
+      tag.className = "route-tag";
+      tag.textContent = servedModel;
+      div.appendChild(tag);
+    }
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      addChatMsg("assistant", '<div class="content"><em>stopped</em></div>');
+    } else {
+      addChatMsg("error", `<div class="content">Could not reach server</div>`);
+    }
+  } finally {
+    chatController = null;
+    stopBtn.classList.add("hidden");
+    sendBtn.disabled = false;
+  }
+}
+
+function stopChat() {
+  if (chatController) chatController.abort();
+}
+
 /* ---- init ---- */
 restoreSession();
