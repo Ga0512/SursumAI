@@ -1006,7 +1006,9 @@ async function loadChat() {
     ? pools.map((p) => `<option value="${p.id}">${p.name} (${p.mode || "escalation"})</option>`).join("")
     : '<option value="">No pools yet</option>';
   if (prev && pools.some((p) => p.id === prev)) sel.value = prev;
-  document.getElementById("poolBtn").classList.toggle("hidden", !pools.length);
+  const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
+  const hasHealthy = deploys.some((d) => d.status === "healthy");
+  document.getElementById("poolBtn").classList.toggle("hidden", !hasHealthy);
   const hasPool = pools.length > 0;
   document.getElementById("chatInput").disabled = !hasPool;
   document.getElementById("chatSend").disabled = !hasPool;
@@ -1020,21 +1022,32 @@ function chatPoolChanged() {
   newChat();
 }
 
+let poolHealthyDeploys = [];
+
 async function openPoolModal() {
   const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
   const healthy = deploys.filter((d) => d.status === "healthy");
-  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
   if (!healthy.length) { toast("Deploy a model first"); return; }
-  const weak = document.getElementById("p_weak");
-  const strong = document.getElementById("p_strong");
-  const judge = document.getElementById("p_judge");
-  weak.innerHTML = opts;
-  strong.innerHTML = opts;
-  judge.innerHTML = '<option value="">—</option>' + opts;
-  strong.value = healthy.length > 1 ? healthy[1].id : healthy[0].id;
-  if (weak.value === strong.value && healthy.length > 1) strong.value = healthy[1].id;
+  poolHealthyDeploys = healthy;
+  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
+  document.getElementById("p_judge").innerHTML = '<option value="">—</option>' + opts;
   document.getElementById("p_name").value = "";
+  const box = document.getElementById("p_models");
+  box.innerHTML = "";
+  addPoolModel(healthy[0]?.id);
+  addPoolModel(healthy.length > 1 ? healthy[1].id : healthy[0]?.id);
   document.getElementById("poolModal").classList.remove("hidden");
+}
+
+function addPoolModel(selectedId) {
+  const opts = poolHealthyDeploys.map((d) =>
+    `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${d.spec.model} (${d.id.slice(0, 8)})</option>`
+  ).join("");
+  const div = document.createElement("div");
+  div.className = "pool-model-row";
+  div.innerHTML = `<select class="input">${opts}</select>
+    <button type="button" class="btn btn-ghost pool-model-remove" title="Remove" onclick="this.parentElement.remove()">✕</button>`;
+  document.getElementById("p_models").appendChild(div);
 }
 
 function closePoolModal() {
@@ -1043,16 +1056,15 @@ function closePoolModal() {
 
 async function createPool() {
   const name = document.getElementById("p_name").value.trim() || "Default";
-  const weak_id = document.getElementById("p_weak").value;
-  const strong_id = document.getElementById("p_strong").value;
   const judge_id = document.getElementById("p_judge").value || null;
   const mode = document.getElementById("p_mode").value;
-  if (!weak_id || !strong_id) { toast("Pick weak and strong models"); return; }
-  if (weak_id === strong_id) { toast("Weak and strong must be different"); return; }
+  const model_ids = [...document.querySelectorAll("#p_models select")].map((s) => s.value);
+  if (model_ids.length < 2) { toast("Add at least 2 models"); return; }
+  if (new Set(model_ids).size !== model_ids.length) { toast("Duplicate models in pool"); return; }
   const res = await fetch(`${API}/pools`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ name, weak_id, strong_id, judge_id, mode }),
+    body: JSON.stringify({ name, judge_id, mode, model_ids }),
   });
   const data = await res.json();
   if (!res.ok) { toast(data.detail || "Pool creation failed"); return; }

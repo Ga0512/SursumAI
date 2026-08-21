@@ -295,24 +295,22 @@
         <input id="p_name" class="input" placeholder="e.g. Default" autocomplete="off" />
       </div>
       <div class="field">
-        <label>Weak model <span class="opt">(handles most messages)</span></label>
-        <select id="p_weak" class="input"></select>
+        <label>Models <span class="opt">(2+; the router picks between them)</span></label>
+        <div id="p_models" class="pool-models"></div>
+        <button type="button" class="btn btn-ghost pool-add" onclick="addPoolModel()">+ Add model</button>
       </div>
       <div class="field">
-        <label>Strong model <span class="opt">(for hard questions)</span></label>
-        <select id="p_strong" class="input"></select>
-      </div>
-      <div class="field">
-        <label>Judge <span class="opt">(optional — decides when to escalate; uses weak if empty)</span></label>
+        <label>Judge <span class="opt">(optional — decides routing; uses first model if empty)</span></label>
         <select id="p_judge" class="input"><option value="">—</option></select>
       </div>
       <div class="field">
         <label>Mode <span class="opt">(how the pool routes)</span></label>
         <select id="p_mode" class="input">
-          <option value="escalation">Escalation — judge LLM decide (recommended)</option>
+          <option value="escalation">Escalation — weak answers, judge escalates to strong</option>
+          <option value="classifier">Classifier — judge picks the best model for each question</option>
           <option value="advisor">Advisor — instant answer, judge in background</option>
           <option value="stage">Stage — rules only, no judge (fastest)</option>
-          <option value="round_robin">Round-robin — alternate weak/strong</option>
+          <option value="round_robin">Round-robin — alternate models</option>
         </select>
       </div>
       <button id="poolBtnSubmit" class="btn btn-primary" style="width:100%" onclick="createPool()">Create pool</button>

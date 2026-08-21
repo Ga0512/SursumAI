@@ -30,6 +30,16 @@ model) or whether its reply is acceptable.
 
 Answer with ONLY valid JSON: {"escalate": true|false, "reason": "short reason"}"""
 
+CLASSIFIER_PROMPT = """You are a model router. You pick which model answers a user turn.
+
+Available models (id: description):
+{candidates}
+
+Read the user request and pick the single best model for it. Consider
+strengths (math, code, vision, long answers, chat) and cost.
+
+Answer with ONLY valid JSON: {{"choice": "<model_id>", "reason": "short reason"}}"""
+
 
 def _content_of(result: dict) -> str:
     try:
@@ -327,11 +337,85 @@ def route_round_robin(store: Store, pool, session: RouterSession, user_id: str,
     }
 
 
+def _pool_candidates(store: Store, pool) -> list:
+    """Ordered deploy objects of the pool. Falls back to weak/strong for
+    legacy pools without pool_models entries."""
+    ids = store.get_pool_models(pool.id)
+    if not ids:
+        ids = [pool.weak_id, pool.strong_id]
+    candidates = []
+    for did in ids:
+        deploy = store.get(did)
+        if deploy is not None and deploy.endpoint:
+            candidates.append(deploy)
+    return candidates
+
+
+def _classifier_choice(store: Store, pool, candidates: list, messages: list[dict]) -> str:
+    """Ask the judge model which candidate answers. Returns a deploy id;
+    falls back to the first candidate on any failure (fails open)."""
+    judge_endpoint = None
+    if pool.judge_id:
+        judge = store.get(pool.judge_id)
+        judge_endpoint = judge.endpoint if judge else None
+    if judge_endpoint is None and candidates:
+        judge_endpoint = candidates[0].endpoint
+
+    lines = "\n".join(
+        f"{c.id}: {c.spec.model}" for c in candidates
+    )
+    payload = {
+        "model": "router-classifier",
+        "messages": [
+            {"role": "system", "content": CLASSIFIER_PROMPT.format(candidates=lines)},
+            {"role": "user", "content": _last_user_text(messages)},
+        ],
+        "max_tokens": 120,
+        "temperature": 0.0,
+        "stream": False,
+    }
+    try:
+        result = agent_client.chat(judge_endpoint, payload, timeout=60.0)
+        raw = _content_of(result)
+        verdict = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        choice = str(verdict.get("choice", ""))
+        if any(c.id == choice for c in candidates):
+            return choice
+    except Exception:
+        pass
+    return candidates[0].id if candidates else None
+
+
+def route_classifier(store: Store, pool, session: RouterSession, user_id: str,
+                     messages: list[dict], max_tokens: int,
+                     temperature: float | None) -> dict:
+    """NVIDIA-style llm_classifier: a judge reads the request and picks the
+    single best model among the pool's N candidates."""
+    candidates = _pool_candidates(store, pool)
+    if not candidates:
+        raise ValueError(f"pool {pool.name} has no deploy with endpoint")
+
+    chosen_id = _classifier_choice(store, pool, candidates, messages)
+    chosen = next((c for c in candidates if c.id == chosen_id), candidates[0])
+    result = agent_client.chat(chosen.endpoint, {
+        "messages": messages, "max_tokens": max_tokens, "stream": False,
+        "model": chosen.spec.model, **({"temperature": temperature} if temperature is not None else {}),
+    })
+    return {
+        "served": chosen.id,
+        "decision": "classifier",
+        "content": _content_of(result),
+        "usage": _usage_of(result),
+        "latched": False,
+    }
+
+
 ROUTE_MODES = {
     "escalation": route_escalation,
     "advisor": route_advisor,
     "stage": route_stage,
     "round_robin": route_round_robin,
+    "classifier": route_classifier,
 }
 
 

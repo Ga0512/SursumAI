@@ -215,6 +215,34 @@ class Store:
             )
         elif "mode" not in cols:
             self._conn.execute("ALTER TABLE pools ADD COLUMN mode TEXT NOT NULL DEFAULT 'escalation'")
+
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pool_models (
+                pool_id TEXT NOT NULL,
+                deploy_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (pool_id, deploy_id)
+            )
+            """
+        )
+        # backfill: pools criados antes do pool_models ganham weak/strong como entradas
+        existing = self._conn.execute(
+            "SELECT p.id, p.weak_id, p.strong_id FROM pools p "
+            "WHERE NOT EXISTS (SELECT 1 FROM pool_models pm WHERE pm.pool_id = p.id) "
+            "AND p.weak_id IS NOT NULL AND p.weak_id != ''"
+        ).fetchall()
+        for row in existing:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO pool_models (pool_id, deploy_id, position) VALUES (?, ?, 0)",
+                (row["id"], row["weak_id"]),
+            )
+            self._conn.execute(
+                "INSERT OR IGNORE INTO pool_models (pool_id, deploy_id, position) VALUES (?, ?, 1)",
+                (row["id"], row["strong_id"]),
+            )
+        if existing:
+            self._conn.commit()
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(router_sessions)")]
         if not cols:
             self._conn.execute(
@@ -419,6 +447,25 @@ class Store:
 
     def delete_pool(self, id: str) -> None:
         self._conn.execute("DELETE FROM pools WHERE id = ?", (id,))
+        self._conn.execute("DELETE FROM pool_models WHERE pool_id = ?", (id,))
+        self._conn.commit()
+
+    def get_pool_models(self, pool_id: str) -> list[str]:
+        """Ordered deploy ids of a pool (position asc). Empty for legacy pools
+        that only set weak_id/strong_id."""
+        rows = self._conn.execute(
+            "SELECT deploy_id FROM pool_models WHERE pool_id = ? ORDER BY position ASC",
+            (pool_id,),
+        ).fetchall()
+        return [r["deploy_id"] for r in rows]
+
+    def replace_pool_models(self, pool_id: str, deploy_ids: list[str]) -> None:
+        self._conn.execute("DELETE FROM pool_models WHERE pool_id = ?", (pool_id,))
+        for i, deploy_id in enumerate(deploy_ids):
+            self._conn.execute(
+                "INSERT INTO pool_models (pool_id, deploy_id, position) VALUES (?, ?, ?)",
+                (pool_id, deploy_id, i),
+            )
         self._conn.commit()
 
     def _pool_from_row(self, row: sqlite3.Row) -> Pool:

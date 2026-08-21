@@ -78,9 +78,10 @@ class ChatRequest(BaseModel):
 
 class PoolRequest(BaseModel):
     name: str
-    weak_id: str
-    strong_id: str
+    weak_id: str | None = None
+    strong_id: str | None = None
     judge_id: str | None = None
+    model_ids: list[str] | None = None
     mode: str = "escalation"
 
 
@@ -440,9 +441,10 @@ def _get_owned_pool(pool_id: str, user_id: str) -> Pool:
 
 
 def _check_pool_members(pool: Pool, user_id: str) -> None:
-    for deploy_id in (pool.weak_id, pool.strong_id, pool.judge_id):
-        if not deploy_id:
-            continue
+    deploy_ids = store.get_pool_models(pool.id)
+    if not deploy_ids:
+        deploy_ids = [d for d in (pool.weak_id, pool.strong_id, pool.judge_id) if d]
+    for deploy_id in deploy_ids:
         deploy = store.get(deploy_id)
         if deploy is None or deploy.user_id != user_id:
             raise HTTPException(status_code=422, detail=f"deploy {deploy_id} not found")
@@ -452,22 +454,43 @@ def _check_pool_members(pool: Pool, user_id: str) -> None:
 
 @app.get("/pools")
 async def list_pools(user=Depends(_current_user)):
-    return [p.to_dict() for p in store.list_pools(user.id)]
+    out = []
+    for p in store.list_pools(user.id):
+        d = p.to_dict()
+        d["model_ids"] = store.get_pool_models(p.id) or [p.weak_id, p.strong_id]
+        out.append(d)
+    return out
 
 
 @app.post("/pools", status_code=201)
 async def create_pool(req: PoolRequest, user=Depends(_current_user)):
-    if req.weak_id == req.strong_id:
-        raise HTTPException(status_code=422, detail="weak and strong must be different deploys")
-    if req.mode not in ("escalation", "advisor", "stage", "round_robin"):
+    if req.mode not in ("escalation", "advisor", "stage", "round_robin", "classifier"):
         raise HTTPException(status_code=422, detail="invalid pool mode")
-    pool = store.create_pool(user.id, req.name, req.weak_id, req.strong_id, req.judge_id, req.mode)
+    if req.model_ids:
+        model_ids = req.model_ids
+        if len(model_ids) < 2:
+            raise HTTPException(status_code=422, detail="pool needs at least 2 models")
+        if len(set(model_ids)) != len(model_ids):
+            raise HTTPException(status_code=422, detail="duplicate models in pool")
+        weak_id, strong_id = model_ids[0], model_ids[1]
+    else:
+        if not req.weak_id or not req.strong_id:
+            raise HTTPException(status_code=422, detail="model_ids or weak_id+strong_id required")
+        if req.weak_id == req.strong_id:
+            raise HTTPException(status_code=422, detail="weak and strong must be different deploys")
+        weak_id, strong_id = req.weak_id, req.strong_id
+        model_ids = [weak_id, strong_id]
+
+    pool = store.create_pool(user.id, req.name, weak_id, strong_id, req.judge_id, req.mode)
     try:
+        store.replace_pool_models(pool.id, model_ids)
         _check_pool_members(pool, user.id)
     except HTTPException:
         store.delete_pool(pool.id)
         raise
-    return pool.to_dict()
+    out = pool.to_dict()
+    out["model_ids"] = store.get_pool_models(pool.id)
+    return out
 
 
 @app.delete("/pools/{pool_id}")
@@ -515,6 +538,8 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
         served_model = f"{pool.name} (weak)"
     elif outcome["decision"] in ("escalated", "strong"):
         served_model = f"{pool.name} (strong)"
+    elif outcome["decision"] == "classifier":
+        served_model = f"{pool.name} (classifier)"
     elif outcome["decision"] == "latched":
         served_model = f"{pool.name} (strong, latched)"
     content = outcome["content"]
