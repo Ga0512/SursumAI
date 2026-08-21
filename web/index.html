@@ -306,6 +306,15 @@
         <label>Judge <span class="opt">(optional — decides when to escalate; uses weak if empty)</span></label>
         <select id="p_judge" class="input"><option value="">—</option></select>
       </div>
+      <div class="field">
+        <label>Mode <span class="opt">(how the pool routes)</span></label>
+        <select id="p_mode" class="input">
+          <option value="escalation">Escalation — judge LLM decide (recommended)</option>
+          <option value="advisor">Advisor — instant answer, judge in background</option>
+          <option value="stage">Stage — rules only, no judge (fastest)</option>
+          <option value="round_robin">Round-robin — alternate weak/strong</option>
+        </select>
+      </div>
       <button id="poolBtnSubmit" class="btn btn-primary" style="width:100%" onclick="createPool()">Create pool</button>
     </div>
   </div>

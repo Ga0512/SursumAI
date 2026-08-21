@@ -89,14 +89,15 @@ class Deploy:
 
 class Pool:
     def __init__(self, user_id: str, name: str, weak_id: str, strong_id: str,
-                 judge_id: str | None = None, id: str | None = None,
-                 created_at: str | None = None):
+                 judge_id: str | None = None, mode: str = "escalation",
+                 id: str | None = None, created_at: str | None = None):
         self.id = id or uuid.uuid4().hex
         self.user_id = user_id
         self.name = name
         self.weak_id = weak_id
         self.strong_id = strong_id
         self.judge_id = judge_id
+        self.mode = mode
         self.created_at = created_at or _now()
 
     def to_dict(self) -> dict:
@@ -107,6 +108,7 @@ class Pool:
             "weak_id": self.weak_id,
             "strong_id": self.strong_id,
             "judge_id": self.judge_id,
+            "mode": self.mode,
             "created_at": self.created_at,
         }
 
@@ -206,10 +208,13 @@ class Store:
                     weak_id TEXT NOT NULL,
                     strong_id TEXT NOT NULL,
                     judge_id TEXT,
+                    mode TEXT NOT NULL DEFAULT 'escalation',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+        elif "mode" not in cols:
+            self._conn.execute("ALTER TABLE pools ADD COLUMN mode TEXT NOT NULL DEFAULT 'escalation'")
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(router_sessions)")]
         if not cols:
             self._conn.execute(
@@ -390,14 +395,14 @@ class Store:
     # ---- pools ----
 
     def create_pool(self, user_id: str, name: str, weak_id: str, strong_id: str,
-                    judge_id: str | None = None) -> Pool:
+                    judge_id: str | None = None, mode: str = "escalation") -> Pool:
         pool = Pool(user_id=user_id, name=name, weak_id=weak_id, strong_id=strong_id,
-                    judge_id=judge_id)
+                    judge_id=judge_id, mode=mode)
         self._conn.execute(
-            "INSERT INTO pools (id, user_id, name, weak_id, strong_id, judge_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pools (id, user_id, name, weak_id, strong_id, judge_id, mode, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (pool.id, pool.user_id, pool.name, pool.weak_id, pool.strong_id, pool.judge_id,
-             pool.created_at),
+             pool.mode, pool.created_at),
         )
         self._conn.commit()
         return pool
@@ -420,6 +425,7 @@ class Store:
         return Pool(
             id=row["id"], user_id=row["user_id"], name=row["name"],
             weak_id=row["weak_id"], strong_id=row["strong_id"], judge_id=row["judge_id"],
+            mode=row["mode"] if "mode" in row.keys() else "escalation",
             created_at=row["created_at"],
         )
 
@@ -442,6 +448,20 @@ class Store:
             """,
             (session.id, session.pool_id, session.user_id, int(session.latched),
              session.streak, session.created_at, session.updated_at),
+        )
+        self._conn.commit()
+
+    def apply_judge_verdict(self, session_id: str, escalate: bool, confirmations: int = 2) -> None:
+        """Atomically update streak/latch from an async judge verdict."""
+        self._conn.execute(
+            """
+            UPDATE router_sessions
+            SET streak = CASE WHEN ? THEN streak + 1 ELSE 0 END,
+                latched = CASE WHEN ? AND streak + 1 >= ? THEN 1 ELSE latched END,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (int(escalate), int(escalate), confirmations, _now(), session_id),
         )
         self._conn.commit()
 

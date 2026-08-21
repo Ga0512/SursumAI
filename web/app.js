@@ -1003,7 +1003,7 @@ async function loadChat() {
   const sel = document.getElementById("chatPool");
   const prev = sel.value;
   sel.innerHTML = pools.length
-    ? pools.map((p) => `<option value="${p.id}">${p.name}</option>`).join("")
+    ? pools.map((p) => `<option value="${p.id}">${p.name} (${p.mode || "escalation"})</option>`).join("")
     : '<option value="">No pools yet</option>';
   if (prev && pools.some((p) => p.id === prev)) sel.value = prev;
   document.getElementById("poolBtn").classList.toggle("hidden", !pools.length);
@@ -1046,12 +1046,13 @@ async function createPool() {
   const weak_id = document.getElementById("p_weak").value;
   const strong_id = document.getElementById("p_strong").value;
   const judge_id = document.getElementById("p_judge").value || null;
+  const mode = document.getElementById("p_mode").value;
   if (!weak_id || !strong_id) { toast("Pick weak and strong models"); return; }
   if (weak_id === strong_id) { toast("Weak and strong must be different"); return; }
   const res = await fetch(`${API}/pools`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ name, weak_id, strong_id, judge_id }),
+    body: JSON.stringify({ name, weak_id, strong_id, judge_id, mode }),
   });
   const data = await res.json();
   if (!res.ok) { toast(data.detail || "Pool creation failed"); return; }

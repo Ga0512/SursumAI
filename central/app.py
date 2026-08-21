@@ -81,6 +81,7 @@ class PoolRequest(BaseModel):
     weak_id: str
     strong_id: str
     judge_id: str | None = None
+    mode: str = "escalation"
 
 
 class RouterChatRequest(BaseModel):
@@ -458,7 +459,9 @@ async def list_pools(user=Depends(_current_user)):
 async def create_pool(req: PoolRequest, user=Depends(_current_user)):
     if req.weak_id == req.strong_id:
         raise HTTPException(status_code=422, detail="weak and strong must be different deploys")
-    pool = store.create_pool(user.id, req.name, req.weak_id, req.strong_id, req.judge_id)
+    if req.mode not in ("escalation", "advisor", "stage", "round_robin"):
+        raise HTTPException(status_code=422, detail="invalid pool mode")
+    pool = store.create_pool(user.id, req.name, req.weak_id, req.strong_id, req.judge_id, req.mode)
     try:
         _check_pool_members(pool, user.id)
     except HTTPException:
@@ -508,9 +511,9 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         return
     served_model = pool.name
-    if outcome["decision"] == "weak_ok":
+    if outcome["decision"] in ("weak_ok", "weak_bad", "weak", "advisor"):
         served_model = f"{pool.name} (weak)"
-    elif outcome["decision"] == "escalated":
+    elif outcome["decision"] in ("escalated", "strong"):
         served_model = f"{pool.name} (strong)"
     elif outcome["decision"] == "latched":
         served_model = f"{pool.name} (strong, latched)"
