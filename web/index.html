@@ -21,16 +21,86 @@
     </nav>
     <div class="hero">
       <h1>
-        Self-Hosting models<br />
-        for <span id="rotator" class="typing">open weights</span>
+        Run open models on<br />
+        your own machine
       </h1>
       <p class="sub">
-        Self-hosted multimodal models, one click away, on your account, at your cost.
+        SursumAI deploys Qwen, DeepSeek, Mistral and Bonsai on your hardware and
+        gives you an OpenAI-style URL to use from any app. No Docker, Python or
+        GPU knowledge required.
       </p>
       <div class="actions">
         <button class="btn btn-primary" onclick="showView('login')">Get started</button>
         <button class="btn" onclick="showView('login')">View demo</button>
       </div>
+    </div>
+
+    <div class="hero-shot">
+      <img src="/screenshots/02-dashboard.png" alt="SursumAI dashboard showing model deployments and metrics" loading="lazy" />
+    </div>
+
+    <div class="landing-section">
+      <h2>Deploy in one click</h2>
+      <p class="landing-sub">Pick a model, click Deploy, and get a link any OpenAI-compatible app can use. The platform decides the runtime, ports and GPU for you.</p>
+      <div class="feature-grid">
+        <div class="feature">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 7.4l-5.2 5.2c-.3.3-.8.3-1.1 0l-2.9-2.9a.75.75 0 1 1 1.1-1.1l2.3 2.3 4.6-4.6a.75.75 0 0 1 1.2 1.1z" fill="currentColor"/></svg>
+          <h3>One command setup</h3>
+          <p>Clone, run <code>start.sh</code>, done. The installer ships the Python env, the llama binary and Docker setup, all hidden.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm1-13h-2v6l5.2 3.1 1-1.7-4.2-2.5z" fill="currentColor"/></svg>
+          <h3>GPU detected for you</h3>
+          <p>NVIDIA GPU + Docker uses vLLM. GPU without Docker uses native CUDA. Anything else uses llama-server on CPU. Never a manual choice.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C7 2 3 6 3 11c0 3.3 1.8 5.9 4.5 7.3V22h9v-3.7C19.2 16.9 21 14.3 21 11c0-5-4-9-9-9zm3.5 11.5l-5 3-.5-4.7 3-3-4.3.4L6 12.6 4.6 10l4-2.5 1.4.6.9-3.4 4.4.4 1.3 1.4-.9 2.4 1.4 1.5z" fill="currentColor"/></svg>
+          <h3>Router across models</h3>
+          <p>Create a pool of 2+ models and the router picks the best one per message. Judge escalation, rule-based routing and round-robin included.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="landing-section">
+      <h2>How it works</h2>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <h3>Create your account</h3>
+          <p>Email and password, stored locally in your machine.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <h3>Pick a model</h3>
+          <p>Qwen, DeepSeek, Mistral, Muse-Glimmer or Bonsai, from the provider catalog.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <h3>Deploy and use</h3>
+          <p>Your deployment gets a URL and ready-made Python, JS and curl snippets.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="landing-section">
+      <h2>Runs on your hardware</h2>
+      <p class="landing-sub">Models stay on your machine. No cloud API, no token metering, no data leaving your machine.</p>
+      <div class="landing-cols">
+        <div class="landing-col">
+          <h3>vLLM</h3>
+          <p>High-throughput inference on NVIDIA GPUs with Docker. Prefix caching enabled by default.</p>
+        </div>
+        <div class="landing-col">
+          <h3>llama-server</h3>
+          <p>GGUF models on any machine, including vision (VLM). GPU via Docker, Vulkan or native CUDA.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="landing-cta">
+      <h2>Your models. Your machine. Your URL.</h2>
+      <p>Deploy your first self-hosted model in one command.</p>
+      <button class="btn btn-primary" onclick="showView('login')">Get started</button>
     </div>
   </section>
 

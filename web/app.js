@@ -104,42 +104,6 @@ function toast(msg) {
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-/* ---- hero rotator ---- */
-const PILLARS = [
-  ["open weights", "tc-blue"],
-  ["fine-tuned models", "tc-purple"],
-  ["your own cloud (BYOC)", "tc-green"],
-  ["unlimited tokens", "tc-pink"],
-];
-
-const rotator = document.getElementById("rotator");
-let pillarIdx = 0;
-let charIdx = 0;
-let deleting = false;
-let paused = false;
-
-function typeTick() {
-  if (paused) return;
-  const [text, cls] = PILLARS[pillarIdx];
-  if (!deleting) {
-    charIdx++;
-    if (charIdx >= text.length) {
-      paused = true;
-      setTimeout(() => { paused = false; deleting = true; typeTick(); }, 1800);
-    }
-  } else {
-    charIdx--;
-    if (charIdx <= 0) {
-      deleting = false;
-      pillarIdx = (pillarIdx + 1) % PILLARS.length;
-    }
-  }
-  const [t, c] = PILLARS[pillarIdx];
-  rotator.innerHTML = `<span class="token-chip ${c}">${t.slice(0, Math.max(charIdx, 0))}</span>`;
-  if (!paused) setTimeout(typeTick, deleting ? 45 : 95);
-}
-typeTick();
-
 /* ---- model provider picker (Bedrock-style) ---- */
 const PROVIDERS = {
   qwen: {

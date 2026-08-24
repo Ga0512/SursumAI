@@ -123,7 +123,7 @@ body {
 }
 
 /* --- hero --- */
-.hero { padding: 96px 24px; text-align: center; }
+.hero { padding: 88px 24px 40px; text-align: center; }
 .hero h1 {
   font-size: clamp(2.4rem, 6vw, 4.2rem);
   font-weight: 800;
@@ -133,7 +133,7 @@ body {
   margin: 0 auto 24px;
 }
 .hero .sub {
-  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
   color: var(--text-soft);
   max-width: 640px;
   margin: 0 auto 40px;
@@ -141,6 +141,66 @@ body {
 .hero .actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
 .hero .typing { display: inline-block; border-right: 3px solid var(--blue); padding-right: 4px; animation: blink 0.9s step-end infinite; }
 @keyframes blink { 50% { border-color: transparent; } }
+
+.hero-shot { max-width: 920px; margin: 8px auto 0; padding: 0 24px; }
+.hero-shot img {
+  width: 100%;
+  border-radius: 18px;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 30px 70px -30px rgba(15, 23, 42, 0.45);
+  display: block;
+}
+
+.landing-section { max-width: 920px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+.landing-section h2 { font-size: clamp(1.7rem, 3.5vw, 2.3rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 12px; }
+.landing-sub { color: var(--text-soft); max-width: 620px; margin: 0 auto 36px; font-size: 1.02rem; }
+
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: left; }
+.feature {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow);
+}
+.feature svg { width: 28px; height: 28px; color: var(--blue); margin-bottom: 12px; }
+.feature h3 { font-size: 1.02rem; font-weight: 700; margin-bottom: 6px; }
+.feature p { font-size: 0.88rem; color: var(--text-soft); line-height: 1.5; }
+.feature code { font-family: ui-monospace, monospace; background: rgba(255,255,255,0.5); padding: 1px 5px; border-radius: 6px; }
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: left; }
+.step {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow);
+}
+.step-num {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 50%; background: #111827; color: #fff;
+  font-size: 0.85rem; font-weight: 800; margin-bottom: 12px;
+}
+.step h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.step p { font-size: 0.88rem; color: var(--text-soft); line-height: 1.5; }
+
+.landing-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; text-align: left; }
+.landing-col {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow);
+}
+.landing-col h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.landing-col p { font-size: 0.88rem; color: var(--text-soft); line-height: 1.5; }
+
+.landing-cta { max-width: 920px; margin: 80px auto 0; padding: 56px 24px; text-align: center; }
+.landing-cta h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 10px; }
+.landing-cta p { color: var(--text-soft); margin-bottom: 24px; }
 
 /* --- auth card --- */
 .auth-wrap { min-height: 80vh; display: grid; place-items: center; padding: 24px; }
@@ -615,7 +675,7 @@ body {
 /* --- responsive --- */
 @media (max-width: 768px) {
   .nav { padding: 16px 18px; flex-wrap: wrap; gap: 10px; }
-  .hero { padding: 64px 18px; }
+  .hero { padding: 64px 18px 32px; }
   .hero h1 { font-size: clamp(2rem, 8vw, 2.8rem); }
   .dash { padding: 16px 16px 64px; }
   .dash-head { flex-direction: column; align-items: stretch; gap: 14px; }
@@ -630,6 +690,8 @@ body {
   .overlay { padding: 14px; }
   .modal { padding: 24px 20px; max-height: calc(100vh - 28px); }
   .toast { width: 90%; text-align: center; white-space: normal; }
+  .feature-grid, .steps, .landing-cols { grid-template-columns: 1fr; }
+  .hero-shot img { border-radius: 14px; }
 }
 
 @media (max-width: 420px) {
