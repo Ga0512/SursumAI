@@ -202,6 +202,24 @@ body {
 .landing-cta h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 10px; }
 .landing-cta p { color: var(--text-soft); margin-bottom: 24px; }
 
+.landing-install { max-width: 920px; margin: 72px auto 0; padding: 0 24px; text-align: center; }
+.landing-install h2 { font-size: clamp(1.7rem, 3.5vw, 2.3rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 12px; }
+.install-box {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(17, 20, 30, 0.92); border-radius: 14px;
+  padding: 16px 18px; max-width: 760px; margin: 0 auto 14px;
+  box-shadow: 0 20px 48px -24px rgba(15, 23, 42, 0.4);
+}
+.install-cmd {
+  flex: 1; text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88rem; color: #d7e0f2;
+  overflow-x: auto; white-space: nowrap;
+}
+.install-copy { flex: none; font-size: 0.82rem; padding: 0.55em 1.1em; }
+.install-note { font-size: 0.85rem; color: var(--text-soft); }
+.install-note code { font-family: ui-monospace, monospace; background: rgba(255,255,255,0.5); padding: 1px 5px; border-radius: 6px; }
+
 /* --- auth card --- */
 .auth-wrap { min-height: 80vh; display: grid; place-items: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 420px; padding: 40px; text-align: center; }
