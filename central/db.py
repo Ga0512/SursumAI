@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -10,7 +11,26 @@ from pathlib import Path
 from core.spec import Spec
 
 
-DB_PATH = Path(__file__).resolve().parent.parent / "sursumai.db"
+def _default_db_path() -> Path:
+    """Prefer a native-Linux location (works reliably on WSL/drvfs where
+    SQLite journal deletes are not propagated by the 9p cache). Falls back
+    to the project dir for dev setups where XDG is not set."""
+    root = os.environ.get("SURSUMAI_DB_DIR")
+    if root:
+        p = Path(root) / "sursumai.db"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    try:
+        p = Path(xdg) / "sursumai" / "sursumai.db"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    except OSError:
+        pass
+    return Path(__file__).resolve().parent.parent / "sursumai.db"
+
+
+DB_PATH = _default_db_path()
 
 
 class DeployState:
