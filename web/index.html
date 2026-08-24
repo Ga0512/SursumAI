@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SursumAI — Self-Hosting Models</title>
+  <title>SursumAI - Self-Hosting Models</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -12,7 +13,7 @@
   <!-- ======= LANDING / HERO ======= -->
   <section id="landing">
     <nav class="nav">
-      <span class="logo">◆ SursumAI</span>
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><path d="M14 18h8v12h8v-12h8v30h-8V38h-8v10h-8z" fill="#fff"/><circle cx="46" cy="18" r="4" fill="#2563eb"/><path d="M42 26h8v22h-8z" fill="#2563eb"/></svg>SursumAI</span>
       <div>
         <button class="btn btn-ghost" onclick="showView('login')">Sign in</button>
         <button class="btn btn-primary" onclick="showView('login')">Get started</button>
@@ -24,7 +25,7 @@
         for <span id="rotator" class="typing">open weights</span>
       </h1>
       <p class="sub">
-        Self-hosted multimodal models, one click away — on your account, at your cost.
+        Self-hosted multimodal models, one click away, on your account, at your cost.
       </p>
       <div class="actions">
         <button class="btn btn-primary" onclick="showView('login')">Get started</button>
@@ -54,7 +55,7 @@
   <!-- ======= DASHBOARD ======= -->
   <section id="dashboard" class="hidden">
     <nav class="nav">
-      <span class="logo">◆ SursumAI</span>
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><path d="M14 18h8v12h8v-12h8v30h-8V38h-8v10h-8z" fill="#fff"/><circle cx="46" cy="18" r="4" fill="#2563eb"/><path d="M42 26h8v22h-8z" fill="#2563eb"/></svg>SursumAI</span>
       <div class="nav-right">
         <span id="userName" class="nav-user hidden"></span>
         <button class="btn btn-ghost" onclick="logout()">Sign out</button>
@@ -300,17 +301,17 @@
         <button type="button" class="btn btn-ghost pool-add" onclick="addPoolModel()">+ Add model</button>
       </div>
       <div class="field">
-        <label>Judge <span class="opt">(optional — decides routing; uses first model if empty)</span></label>
+        <label>Judge <span class="opt">(optional: decides routing; uses first model if empty)</span></label>
         <select id="p_judge" class="input"><option value="">—</option></select>
       </div>
       <div class="field">
         <label>Mode <span class="opt">(how the pool routes)</span></label>
         <select id="p_mode" class="input">
-          <option value="escalation">Escalation — weak answers, judge escalates to strong</option>
-          <option value="classifier">Classifier — judge picks the best model for each question</option>
-          <option value="advisor">Advisor — instant answer, judge in background</option>
-          <option value="stage">Stage — rules only, no judge (fastest)</option>
-          <option value="round_robin">Round-robin — alternate models</option>
+          <option value="escalation">Escalation: weak answers, judge escalates to strong</option>
+          <option value="classifier">Classifier: judge picks the best model for each question</option>
+          <option value="advisor">Advisor: instant answer, judge in background</option>
+          <option value="stage">Stage: rules only, no judge (fastest)</option>
+          <option value="round_robin">Round-robin: alternate models</option>
         </select>
       </div>
       <button id="poolBtnSubmit" class="btn btn-primary" style="width:100%" onclick="createPool()">Create pool</button>

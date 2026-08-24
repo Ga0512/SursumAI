@@ -154,7 +154,8 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 32px;
 }
-.nav .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.02em; }
+.nav .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.02em; display: inline-flex; align-items: center; gap: 10px; }
+.logo-mark { width: 30px; height: 30px; border-radius: 8px; display: block; }
 .nav-right { display: flex; align-items: center; gap: 12px; }
 .nav-user { font-size: 0.9rem; color: #94a3b8; }
 .dash { max-width: 1000px; margin: 0 auto; padding: 24px 24px 80px; }

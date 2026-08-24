@@ -249,7 +249,7 @@ function pickProvider(key) {
   });
   input.value = keep;
   if (keep) {
-    document.getElementById("f_model_hint").textContent = `${p.name} — select a model to deploy.`;
+    document.getElementById("f_model_hint").textContent = `${p.name}: select a model to deploy.`;
   } else {
     input.value = "";
     document.getElementById("f_model_hint").textContent = `${p.name} has no models for ${selectedRuntime.toUpperCase()} runtime.`;
@@ -297,9 +297,9 @@ function setRuntimeForModel(r) {
   setRuntime(r);
   const note = document.getElementById("runtimeNote");
   if (r === "llama") {
-    note.textContent = "GGUF model — using llama-server (runs on any machine).";
+    note.textContent = "GGUF model: using llama-server (runs on any machine).";
   } else {
-    note.textContent = "Safetensors model — using vLLM for best performance.";
+    note.textContent = "Safetensors model: using vLLM for best performance.";
   }
 }
 
@@ -333,15 +333,15 @@ async function recommendRuntime() {
     const rec = caps.recommended_runtime || "llama";
     setRuntime(rec);
     if (rec === "vllm") {
-      note.textContent = "NVIDIA GPU detected — using vLLM for best performance.";
+      note.textContent = "NVIDIA GPU detected: using vLLM for best performance.";
     } else if (caps.gpu && !caps.docker) {
-      note.textContent = "NVIDIA GPU found but Docker isn't running — using llama-server.";
+      note.textContent = "NVIDIA GPU found but Docker is not running: using llama-server.";
     } else {
-      note.textContent = "No NVIDIA GPU detected — using llama-server (works on any machine).";
+      note.textContent = "No NVIDIA GPU detected: using llama-server (works on any machine).";
     }
   } catch {
     setRuntime("llama");
-    note.textContent = "Could not detect your machine — using llama-server.";
+    note.textContent = "Could not detect your machine: using llama-server.";
   }
 }
 
@@ -381,16 +381,16 @@ async function applyFit(prevModel) {
     const res = await fetch(`${API}/meta/model_fit?model=${encodeURIComponent(model)}&runtime=${selectedRuntime}`);
     const fit = await res.json();
     if (!fit.ok || fit.fits === false) {
-      hint.textContent = fit.message || "Selected model — customize configuration below if you like.";
+      hint.textContent = fit.message || "Selected model: customize configuration below if you like.";
       return;
     }
-    if (!fit.suggest) { hint.textContent = "Selected model — customize configuration below if you like."; return; }
+    if (!fit.suggest) { hint.textContent = "Selected model: customize configuration below if you like."; return; }
     document.getElementById("f_mem").value = fit.suggest.gpu_memory_utilization;
     document.getElementById("f_len").value = fit.suggest.max_model_len;
     const gb = (fit.weights_mb / 1024).toFixed(1);
     hint.textContent = `${model} needs ~${gb}GB VRAM for weights; suggested config below is editable.`;
   } catch {
-    hint.textContent = "Selected model — customize configuration below if you like.";
+    hint.textContent = "Selected model: customize configuration below if you like.";
   }
 }
 
@@ -550,7 +550,7 @@ let logsDeployId = null;
 
 async function openLogs(id) {
   logsDeployId = id;
-  document.getElementById("logsTitle").textContent = `Logs — ${id.slice(0, 8)}`;
+  document.getElementById("logsTitle").textContent = `Logs: ${id.slice(0, 8)}`;
   document.getElementById("logsModal").classList.remove("hidden");
   await refreshLogs();
   logsTimer = setInterval(refreshLogs, 5000);
@@ -878,7 +878,7 @@ async function sendPlay() {
     }
     const ctx = usage ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) : 0;
     const meta = usage
-      ? `memória da conversa: ${ctx} tokens no total (KV cache) — o modelo lembra de tudo que você disse`
+      ? `memória da conversa: ${ctx} tokens no total (KV cache): o modelo lembra de tudo que você disse`
       : "";
     if (meta) {
       const m = document.createElement("div");
@@ -908,7 +908,7 @@ function stopPlay() {
 function clearPlay() {
   playHistory.length = 0;
   document.getElementById("playMessages").innerHTML =
-    '<div class="play-empty">Memory cleared — the model forgot this conversation.</div>';
+    '<div class="play-empty">Memory cleared. The model forgot this conversation.</div>';
 }
 
 /* ---- code snippets ---- */
@@ -1069,7 +1069,7 @@ async function createPool() {
   const data = await res.json();
   if (!res.ok) { toast(data.detail || "Pool creation failed"); return; }
   closePoolModal();
-  toast("Pool created — the router is ready");
+  toast("Pool created. The router is ready");
   loadChat();
 }
 
