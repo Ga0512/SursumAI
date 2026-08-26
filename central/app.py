@@ -466,6 +466,11 @@ async def list_pools(user=Depends(_current_user)):
 async def create_pool(req: PoolRequest, user=Depends(_current_user)):
     if req.mode not in ("escalation", "advisor", "stage", "round_robin", "classifier"):
         raise HTTPException(status_code=422, detail="invalid pool mode")
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="pool name required")
+    if any(p.name == name for p in store.list_pools(user.id)):
+        raise HTTPException(status_code=422, detail=f"pool name '{name}' already in use")
     if req.model_ids:
         model_ids = req.model_ids
         if len(model_ids) < 2:
@@ -481,7 +486,7 @@ async def create_pool(req: PoolRequest, user=Depends(_current_user)):
         weak_id, strong_id = req.weak_id, req.strong_id
         model_ids = [weak_id, strong_id]
 
-    pool = store.create_pool(user.id, req.name, weak_id, strong_id, req.judge_id, req.mode)
+    pool = store.create_pool(user.id, name, weak_id, strong_id, req.judge_id, req.mode)
     try:
         store.replace_pool_models(pool.id, model_ids)
         _check_pool_members(pool, user.id)
@@ -569,6 +574,11 @@ def _resolve_pool(user: object, model: str) -> Pool:
             raise HTTPException(status_code=422, detail="no pool configured")
         return pools[0]
     pool = store.get_pool(model)
+    if pool is None or pool.user_id != user.id:
+        for candidate in store.list_pools(user.id):
+            if candidate.name == model:
+                pool = candidate
+                break
     if pool is None or pool.user_id != user.id:
         raise HTTPException(status_code=404, detail=f"pool '{model}' not found")
     return pool

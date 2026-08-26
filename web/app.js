@@ -1014,15 +1014,13 @@ async function loadChat() {
     loadPools(),
     fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json()),
   ]);
+  chatPoolList = pools;
   const healthy = deploys.filter((d) => d.status === "healthy");
   const sel = document.getElementById("chatTarget");
   const prev = sel.value;
   const poolOpts = pools.length
     ? pools.map((p) => `<option value="pool:${p.id}">Pool: ${p.name} (${p.mode || "escalation"})</option>`).join("")
     : "";
-  const modelOpts = healthy.length
-    ? healthy.map((d) => `<option value="${d.id}">Model: ${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("")
-    : '<option value="">No healthy models yet</option>';
   sel.innerHTML = (poolOpts ? `<optgroup label="Pools">${poolOpts}</optgroup>` : "") +
     `<optgroup label="Models">${modelOpts}</optgroup>`;
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
@@ -1045,9 +1043,13 @@ function chatTargetChanged() {
   document.getElementById("chatSend").disabled = !hasTarget;
   const apiRow = document.getElementById("chatApiRow");
   const apiUrl = document.getElementById("chatApiUrl");
+  const delBtn = document.getElementById("chatApiDel");
   if (!target) { apiRow.classList.add("hidden"); return; }
-  if (target.startsWith("pool:")) {
-    apiUrl.textContent = `POST /v1/chat/completions  { "model": "${target.slice(5)}", "messages": [...] }`;
+  const isPool = target.startsWith("pool:");
+  delBtn.classList.toggle("hidden", !isPool);
+  if (isPool) {
+    const pool = chatPoolList.find((p) => "pool:" + p.id === target);
+    apiUrl.textContent = `POST /v1/chat/completions  { "model": "${pool ? pool.name : target.slice(5)}", "messages": [...] }`;
   } else {
     apiUrl.textContent = `POST /deploys/${target}/chat  (${target.slice(0, 8)}…)`;
   }
@@ -1055,14 +1057,30 @@ function chatTargetChanged() {
   if (target) renderChatHistory(target);
 }
 
+async function deleteChatPool() {
+  const target = document.getElementById("chatTarget").value;
+  if (!target || !target.startsWith("pool:")) return;
+  const poolId = target.slice(5);
+  const pool = chatPoolList.find((p) => p.id === poolId);
+  if (!confirm(`Delete pool "${pool ? pool.name : poolId.slice(0, 8)}"?`)) return;
+  const res = await fetch(`${API}/pools/${poolId}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) { toast("Failed to delete pool"); return; }
+  toast("Pool deleted");
+  await loadChat();
+  if (chatHistories[target]) delete chatHistories[target];
+  renderChatHistory(document.getElementById("chatTarget").value || "");
+}
+
 function copyChatApi() {
   const target = document.getElementById("chatTarget").value;
   if (!target) return;
+  const pool = target.startsWith("pool:") ? chatPoolList.find((p) => "pool:" + p.id === target) : null;
+  const modelRef = pool ? pool.name : target.slice(5);
   const snippet = target.startsWith("pool:")
     ? `curl -X POST http://localhost:8001/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer $TOKEN" \\
-  -d '{"model": "${target.slice(5)}", "messages": [{"role": "user", "content": "Hello!"}]}'`
+  -d '{"model": "${modelRef}", "messages": [{"role": "user", "content": "Hello!"}]}'`
     : `curl -X POST http://localhost:8001/deploys/${target}/chat \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer $TOKEN" \\
@@ -1129,6 +1147,7 @@ async function createPool() {
 /* ---- chat / playground (model or pool) ---- */
 const chatHistories = {};   // target -> [{role, content}]
 const chatSessions = {};    // pool target -> session_id
+let chatPoolList = [];
 let chatController = null;
 
 function chatTargetLabel(t) {
