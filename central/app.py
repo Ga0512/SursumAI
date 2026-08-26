@@ -314,11 +314,13 @@ async def meta_update():
 
 @app.post("/meta/update")
 async def meta_update_apply():
-    """Re-run the installer in the background to update the codebase."""
+    """Re-run the installer in the background to update the codebase.
+    The installer ends by starting SursumAI, so the services come back up
+    on the new version automatically."""
     import subprocess as sp
     try:
         sp.Popen(
-            ["curl", "-fsSL", f"{REPO_BASE}/raw/main/install.sh"],
+            ["bash", "-c", f"curl -fsSL {REPO_BASE}/raw/main/install.sh | bash"],
             stdout=sp.DEVNULL, stderr=sp.DEVNULL,
             start_new_session=True,
         )
