@@ -47,13 +47,15 @@ class TransportError(Exception):
     pass
 
 
-def deploy_port(deploy_id: str) -> int:
+def deploy_port(deploy_id: str, spec: Spec | None = None) -> int:
+    if spec is not None and spec.port:
+        return spec.port
     digest = int(hashlib.sha256(deploy_id.encode()).hexdigest()[:8], 16)
     return BASE_PORT + (digest % 100)
 
 
-def endpoint(deploy_id: str) -> str:
-    return f"http://localhost:{deploy_port(deploy_id)}/v1"
+def endpoint(deploy_id: str, spec: Spec | None = None) -> str:
+    return f"http://localhost:{deploy_port(deploy_id, spec)}/v1"
 
 
 def _log_file(deploy_id: str) -> Path:
@@ -528,7 +530,7 @@ def _is_gguf(path: Path) -> bool:
 # ---- commands ----
 
 def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list[str]:
-    port = deploy_port(deploy_id)
+    port = deploy_port(deploy_id, spec)
     model_dir = Path(paths["gguf"]).parent
     cmd = [
         "docker", "run", "-d", "--rm",
@@ -555,7 +557,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
 
 
 def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: str) -> list[str]:
-    port = deploy_port(deploy_id)
+    port = deploy_port(deploy_id, spec)
     cmd = [
         exe,
         "--model", paths["gguf"],
@@ -626,7 +628,7 @@ def start(spec: Spec, deploy_id: str) -> str:
         _pid_file(deploy_id).write_text(str(proc.pid))
         _log(deploy_id, f"=== llama-server started (pid {proc.pid}), logging to {log_path.name} ===")
 
-    return endpoint(deploy_id)
+    return endpoint(deploy_id, spec)
 
 
 def is_running(deploy_id: str) -> bool:

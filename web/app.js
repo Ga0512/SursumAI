@@ -305,6 +305,7 @@ async function openModal() {
   document.getElementById("f_len").value = 300;
   document.getElementById("f_tokens").value = 2048;
   document.getElementById("f_temp").value = 0;
+  document.getElementById("f_port").value = "";
   setTarget("local");
   document.getElementById("provider_models").classList.add("hidden");
   document.getElementById("f_model").classList.add("hidden");
@@ -356,6 +357,7 @@ async function openRedeploy(id) {
   document.getElementById("f_len").value = s.max_model_len || 300;
   document.getElementById("f_tokens").value = s.max_tokens || 2048;
   document.getElementById("f_temp").value = s.temperature ?? 0;
+  document.getElementById("f_port").value = s.port ?? "";
   document.getElementById("f_hf_token").value = "";
   document.getElementById("modal").classList.remove("hidden");
 }
@@ -577,6 +579,7 @@ async function deploy() {
     max_tokens: parseInt(document.getElementById("f_tokens").value, 10) || 2048,
     temperature: parseFloat(document.getElementById("f_temp").value) || 0,
     hf_token: document.getElementById("f_hf_token").value.trim() || undefined,
+    port: parseInt(document.getElementById("f_port").value, 10) || undefined,
   };
   if (!payload.model) { toast("Enter a model"); return; }
 

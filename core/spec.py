@@ -20,6 +20,7 @@ class Spec:
     max_tokens: int = 2048
     temperature: float = 0.0
     hf_token: str = ""
+    port: int | None = None  # 9000-9099; None = auto (hash do deploy_id)
 
     def validate(self) -> None:
         if not self.model or not isinstance(self.model, str):
@@ -40,6 +41,9 @@ class Spec:
             raise SpecError("max_tokens must be >= 1")
         if not 0 <= self.temperature <= 2:
             raise SpecError("temperature must be between 0 and 2")
+        if self.port is not None:
+            if not 9000 <= self.port <= 9099:
+                raise SpecError("port must be between 9000 and 9099")
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +57,7 @@ class Spec:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "hf_token": self.hf_token,
+            "port": self.port,
         }
 
     @classmethod

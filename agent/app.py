@@ -186,7 +186,15 @@ async def start_deploy(req: StartRequest, x_agent_key: str | None = Header(None)
     return {"deploy_id": req.deploy_id, "status": "started"}
 
 
+SPECS: dict[str, Spec] = {}
+
+
+def _spec_for(deploy_id: str) -> Spec | None:
+    return SPECS.get(deploy_id)
+
+
 async def _deploy_job(deploy_id: str, spec: Spec) -> None:
+    SPECS[deploy_id] = spec
     try:
         await asyncio.to_thread(_executor(spec.runtime).start, spec, deploy_id)
     except (executor.TransportError, executor_llama.TransportError):
@@ -197,7 +205,7 @@ async def _deploy_job(deploy_id: str, spec: Spec) -> None:
 async def deploy_status(deploy_id: str, x_agent_key: str | None = Header(None)):
     _require_key(x_agent_key)
     running = executor.is_running(deploy_id) or executor_llama.is_running(deploy_id)
-    ep = executor_llama.endpoint(deploy_id)
+    ep = executor_llama.endpoint(deploy_id, _spec_for(deploy_id))
     healthy = _probe_healthy(ep) if running else False
     return {
         "deploy_id": deploy_id,
@@ -220,7 +228,7 @@ async def deploy_metrics(deploy_id: str, x_agent_key: str | None = Header(None))
     if not (executor.is_running(deploy_id) or executor_llama.is_running(deploy_id)):
         raise HTTPException(status_code=404, detail="deploy not running")
     try:
-        return await asyncio.to_thread(metrics.scrape, executor_llama.endpoint(deploy_id))
+        return await asyncio.to_thread(metrics.scrape, executor_llama.endpoint(deploy_id, _spec_for(deploy_id)))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"metrics unavailable: {e}") from e
 

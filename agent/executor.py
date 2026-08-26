@@ -17,13 +17,15 @@ class TransportError(Exception):
     pass
 
 
-def deploy_port(deploy_id: str) -> int:
+def deploy_port(deploy_id: str, spec: Spec | None = None) -> int:
+    if spec is not None and spec.port:
+        return spec.port
     digest = int(hashlib.sha256(deploy_id.encode()).hexdigest()[:8], 16)
     return BASE_PORT + (digest % 100)
 
 
-def endpoint(deploy_id: str) -> str:
-    return f"http://localhost:{deploy_port(deploy_id)}/v1"
+def endpoint(deploy_id: str, spec: Spec | None = None) -> str:
+    return f"http://localhost:{deploy_port(deploy_id, spec)}/v1"
 
 
 def _log_file(deploy_id: str) -> Path:
@@ -37,7 +39,7 @@ def _log(deploy_id: str, line: str) -> None:
 
 
 def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
-    port = deploy_port(deploy_id)
+    port = deploy_port(deploy_id, spec)
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", f"deploy-{deploy_id[:12]}",
@@ -189,7 +191,7 @@ def start(spec: Spec, deploy_id: str) -> str:
     _log(deploy_id, "=== container started, following container logs ===")
     _follow_logs(deploy_id)
 
-    return endpoint(deploy_id)
+    return endpoint(deploy_id, spec)
 
 
 def is_running(deploy_id: str) -> bool:
