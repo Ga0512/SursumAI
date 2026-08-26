@@ -462,14 +462,15 @@ async def list_pools(user=Depends(_current_user)):
     return out
 
 
-@app.post("/pools", status_code=201)
-async def create_pool(req: PoolRequest, user=Depends(_current_user)):
+def _resolve_pool_args(req: PoolRequest, user: object, for_update: bool = False):
+    """Validate PoolRequest and return (name, model_ids, judge_id, mode)."""
     if req.mode not in ("escalation", "advisor", "stage", "round_robin", "classifier"):
         raise HTTPException(status_code=422, detail="invalid pool mode")
     name = (req.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="pool name required")
-    if any(p.name == name for p in store.list_pools(user.id)):
+    if any(p.name == name and p.id != getattr(req, "_pool_id", None)
+           for p in store.list_pools(user.id)):
         raise HTTPException(status_code=422, detail=f"pool name '{name}' already in use")
     if req.model_ids:
         model_ids = req.model_ids
@@ -477,21 +478,49 @@ async def create_pool(req: PoolRequest, user=Depends(_current_user)):
             raise HTTPException(status_code=422, detail="pool needs at least 2 models")
         if len(set(model_ids)) != len(model_ids):
             raise HTTPException(status_code=422, detail="duplicate models in pool")
-        weak_id, strong_id = model_ids[0], model_ids[1]
     else:
         if not req.weak_id or not req.strong_id:
             raise HTTPException(status_code=422, detail="model_ids or weak_id+strong_id required")
         if req.weak_id == req.strong_id:
             raise HTTPException(status_code=422, detail="weak and strong must be different deploys")
-        weak_id, strong_id = req.weak_id, req.strong_id
-        model_ids = [weak_id, strong_id]
+        model_ids = [req.weak_id, req.strong_id]
+    return name, model_ids, req.judge_id, req.mode
 
-    pool = store.create_pool(user.id, name, weak_id, strong_id, req.judge_id, req.mode)
+
+@app.post("/pools", status_code=201)
+async def create_pool(req: PoolRequest, user=Depends(_current_user)):
+    name, model_ids, judge_id, mode = _resolve_pool_args(req, user)
+    weak_id, strong_id = model_ids[0], model_ids[1]
+
+    pool = store.create_pool(user.id, name, weak_id, strong_id, judge_id, mode)
     try:
         store.replace_pool_models(pool.id, model_ids)
         _check_pool_members(pool, user.id)
     except HTTPException:
         store.delete_pool(pool.id)
+        raise
+    out = pool.to_dict()
+    out["model_ids"] = store.get_pool_models(pool.id)
+    return out
+
+
+@app.put("/pools/{pool_id}")
+async def update_pool(pool_id: str, req: PoolRequest, user=Depends(_current_user)):
+    pool = _get_owned_pool(pool_id, user.id)
+    req._pool_id = pool_id
+    name, model_ids, judge_id, mode = _resolve_pool_args(req, user)
+    weak_id, strong_id = model_ids[0], model_ids[1]
+
+    pool.name = name
+    pool.weak_id = weak_id
+    pool.strong_id = strong_id
+    pool.judge_id = judge_id
+    pool.mode = mode
+    store.update_pool(pool)
+    store.replace_pool_models(pool.id, model_ids)
+    try:
+        _check_pool_members(pool, user.id)
+    except HTTPException:
         raise
     out = pool.to_dict()
     out["model_ids"] = store.get_pool_models(pool.id)

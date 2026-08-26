@@ -548,6 +548,7 @@ async function openLogs(id) {
 
 function closeLogs() {
   if (logsTimer) { clearInterval(logsTimer); logsTimer = null; }
+  if (poolLogTimer) { clearInterval(poolLogTimer); poolLogTimer = null; }
   logsDeployId = null;
   document.getElementById("logsModal").classList.add("hidden");
 }
@@ -998,8 +999,47 @@ function switchDash(view) {
   document.querySelectorAll(".dash-tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.view === view));
   document.getElementById("deploysView").classList.toggle("hidden", view !== "deploys");
+  document.getElementById("poolsView").classList.toggle("hidden", view !== "pools");
   document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
   if (view === "chat") loadChat();
+  if (view === "pools") loadPoolsView();
+}
+
+async function loadPoolsView() {
+  const pools = await loadPools();
+  let deploys = [];
+  try {
+    const res = await fetch(`${API}/deploys`, { headers: authHeaders() });
+    if (res.ok) deploys = await res.json();
+  } catch {}
+  const nameById = Object.fromEntries(deploys.map((d) => [d.id, d.spec.model]));
+  const grid = document.getElementById("poolsGrid");
+  if (!pools.length) {
+    grid.innerHTML = `
+      <div class="empty glass">
+        <h3>No pools yet</h3>
+        <p>A pool pairs 2+ models and routes each message to the best one.</p>
+        <br />
+        <button class="btn btn-primary" onclick="openPoolModal()">+ New pool</button>
+      </div>`;
+    return;
+  }
+  grid.innerHTML = pools.map((p) => {
+    const models = (p.model_ids || []).map((m) => nameById[m] || m.slice(0, 8)).join(", ");
+    return `
+      <div class="deploy-card glass">
+        <div class="row">
+          <span class="model">◆ ${p.name}</span>
+          <span class="status healthy"><span class="dot"></span>${p.mode || "escalation"}</span>
+        </div>
+        <div class="meta">${models}</div>
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button class="btn" onclick="openPoolLog('${p.id}')">Log</button>
+          <button class="btn" onclick="editPool('${p.id}')">Edit</button>
+          <button class="btn btn-danger" onclick="deletePool('${p.id}')">Delete</button>
+        </div>
+      </div>`;
+  }).join("");
 }
 
 /* ---- pools ---- */
@@ -1098,6 +1138,8 @@ function copyChatApi() {
 
 let poolHealthyDeploys = [];
 
+let editingPoolId = null;
+
 async function openPoolModal() {
   const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
   const healthy = deploys.filter((d) => d.status === "healthy");
@@ -1113,6 +1155,28 @@ async function openPoolModal() {
   document.getElementById("poolModal").classList.remove("hidden");
 }
 
+async function editPool(poolId) {
+  editingPoolId = poolId;
+  const pools = await loadPools();
+  const pool = pools.find((p) => p.id === poolId);
+  if (!pool) { toast("Pool not found"); return; }
+  const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
+  const healthy = deploys.filter((d) => d.status === "healthy");
+  poolHealthyDeploys = healthy;
+  if (!healthy.length) { toast("Deploy a model first"); return; }
+  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
+  document.getElementById("p_judge").innerHTML = '<option value="">—</option>' + opts;
+  document.getElementById("p_name").value = pool.name || "";
+  document.getElementById("p_mode").value = pool.mode || "escalation";
+  if (pool.judge_id) document.getElementById("p_judge").value = pool.judge_id;
+  const box = document.getElementById("p_models");
+  box.innerHTML = "";
+  for (const m of pool.model_ids || [pool.weak_id, pool.strong_id]) {
+    addPoolModel(m);
+  }
+  document.getElementById("poolModal").classList.remove("hidden");
+}
+
 function addPoolModel(selectedId) {
   const opts = poolHealthyDeploys.map((d) =>
     `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${d.spec.model} (${d.id.slice(0, 8)})</option>`
@@ -1125,6 +1189,7 @@ function addPoolModel(selectedId) {
 }
 
 function closePoolModal() {
+  editingPoolId = null;
   document.getElementById("poolModal").classList.add("hidden");
 }
 
@@ -1135,16 +1200,57 @@ async function createPool() {
   const model_ids = [...document.querySelectorAll("#p_models select")].map((s) => s.value);
   if (model_ids.length < 2) { toast("Add at least 2 models"); return; }
   if (new Set(model_ids).size !== model_ids.length) { toast("Duplicate models in pool"); return; }
-  const res = await fetch(`${API}/pools`, {
-    method: "POST",
+  const url = editingPoolId ? `${API}/pools/${editingPoolId}` : `${API}/pools`;
+  const method = editingPoolId ? "PUT" : "POST";
+  const res = await fetch(url, {
+    method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ name, judge_id, mode, model_ids }),
   });
   const data = await res.json();
-  if (!res.ok) { toast(data.detail || "Pool creation failed"); return; }
+  if (!res.ok) { toast(data.detail || "Pool save failed"); return; }
   closePoolModal();
-  toast("Pool created. The router is ready");
+  toast(editingPoolId ? "Pool updated" : "Pool created. The router is ready");
   loadChat();
+  loadPoolsView();
+}
+
+async function deletePool(poolId) {
+  const pools = await loadPools();
+  const pool = pools.find((p) => p.id === poolId);
+  if (!confirm(`Delete pool "${pool ? pool.name : poolId.slice(0, 8)}"?`)) return;
+  const res = await fetch(`${API}/pools/${poolId}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) { toast("Failed to delete pool"); return; }
+  toast("Pool deleted");
+  loadPoolsView();
+  loadChat();
+}
+
+let poolLogTimer = null;
+
+async function openPoolLog(poolId) {
+  const pools = await loadPools();
+  const pool = pools.find((p) => p.id === poolId);
+  document.getElementById("logsTitle").textContent = `Log — ${pool ? pool.name : poolId.slice(0, 8)}`;
+  document.getElementById("logsModal").classList.remove("hidden");
+  if (poolLogTimer) clearInterval(poolLogTimer);
+  poolLogTimer = setInterval(() => refreshPoolLog(poolId), 5000);
+  await refreshPoolLog(poolId);
+}
+
+async function refreshPoolLog(poolId) {
+  const el = document.getElementById("logsContent");
+  try {
+    const res = await fetch(`${API}/pools/${poolId}/log`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) { el.textContent = data.detail || "Failed to load log"; return; }
+    if (!data.length) { el.textContent = "(no routing decisions yet)"; return; }
+    el.textContent = data.map((e) =>
+      `${e.created_at}  ${e.decision.padEnd(10)} -> ${e.model_served.slice(0, 12)}  ${e.tokens} tokens`
+    ).join("\n");
+  } catch {
+    el.textContent = "Could not reach server";
+  }
 }
 
 /* ---- chat / playground (model or pool) ---- */

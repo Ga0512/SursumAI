@@ -470,6 +470,13 @@ class Store:
         self._conn.execute("DELETE FROM pool_models WHERE pool_id = ?", (id,))
         self._conn.commit()
 
+    def update_pool(self, pool: Pool) -> None:
+        self._conn.execute(
+            "UPDATE pools SET name = ?, weak_id = ?, strong_id = ?, judge_id = ?, mode = ? WHERE id = ?",
+            (pool.name, pool.weak_id, pool.strong_id, pool.judge_id, pool.mode, pool.id),
+        )
+        self._conn.commit()
+
     def get_pool_models(self, pool_id: str) -> list[str]:
         """Ordered deploy ids of a pool (position asc). Empty for legacy pools
         that only set weak_id/strong_id."""

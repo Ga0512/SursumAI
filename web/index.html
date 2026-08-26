@@ -146,6 +146,7 @@
       <div class="dash-head">
         <div class="dash-tabs">
           <button class="dash-tab active" data-view="deploys" onclick="switchDash('deploys')">Deployments</button>
+          <button class="dash-tab" data-view="pools" onclick="switchDash('pools')">Pools</button>
           <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Playground</button>
         </div>
         <div>
@@ -155,6 +156,9 @@
       </div>
       <div id="deploysView">
         <div id="sursumaiGrid" class="sursum-grid"></div>
+      </div>
+      <div id="poolsView" class="hidden">
+        <div id="poolsGrid" class="sursum-grid"></div>
       </div>
       <div id="chatView" class="hidden">
         <div class="chat-area">
