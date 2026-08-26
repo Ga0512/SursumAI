@@ -294,7 +294,7 @@ def cmd_logs(args: argparse.Namespace) -> None:
 
 
 def cmd_destroy(args: argparse.Namespace) -> None:
-    token = _load_token()
+    token = _login()
     deploy_id = args.deploy_id
     if not args.yes:
         try:
@@ -308,6 +308,49 @@ def cmd_destroy(args: argparse.Namespace) -> None:
             pass
     _http("DELETE", f"/deploys/{deploy_id}", token=token)
     ok(f"destroyed {deploy_id}")
+
+
+REPO_URL = "https://github.com/Ga0512/SursumAI"
+INSTALL_URL = f"{REPO_URL}/raw/main/install.sh"
+
+
+def _local_version() -> str:
+    try:
+        v = (Path(SURSUMAI_ROOT) / "VERSION").read_text().strip()
+        return v or "?"
+    except OSError:
+        return "?"
+
+
+def _latest_version() -> str:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{REPO_URL}/raw/main/VERSION", timeout=15) as resp:
+            return resp.read().decode().strip() or "?"
+    except Exception:
+        return "?"
+
+
+def cmd_update(args: argparse.Namespace) -> None:
+    current = _local_version()
+    latest = args.version or _latest_version()
+    print(f"SursumAI {current} -> {latest}")
+    if not args.yes and latest != "?" and current != "?" and latest == current:
+        print("already up to date")
+        return
+    if not args.yes:
+        confirm = input(f"update to {latest}? [y/N] ")
+        if confirm.strip().lower() not in ("y", "yes"):
+            print("aborted")
+            return
+    cmd_stop(args)
+    env = dict(os.environ)
+    if args.version:
+        env["SURSUMAI_VERSION"] = args.version
+    pipe = f"curl -fsSL {INSTALL_URL} | bash"
+    print("running installer…")
+    subprocess.run(["bash", "-c", pipe], env=env, check=True)
+    ok(f"updated to {latest}. run `sursumai` to start")
 
 
 # ---------- main ----------
@@ -343,6 +386,10 @@ def main() -> None:
     p_destroy.add_argument("deploy_id")
     p_destroy.add_argument("--yes", action="store_true")
 
+    p_update = sub.add_parser("update", help="update SursumAI to the latest version")
+    p_update.add_argument("--yes", action="store_true", help="skip confirmation")
+    p_update.add_argument("--version", default=None, help="install a specific branch/tag")
+
     args = parser.parse_args()
 
     try:
@@ -364,6 +411,8 @@ def main() -> None:
             cmd_logs(args)
         elif args.command == "destroy":
             cmd_destroy(args)
+        elif args.command == "update":
+            cmd_update(args)
     except CliError as e:
         die(str(e))
 

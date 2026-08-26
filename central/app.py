@@ -4,7 +4,9 @@ import asyncio
 import json
 import re
 import time
+import urllib.request
 import uuid
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -277,6 +279,52 @@ async def meta_model_fit(model: str, runtime: str = "llama"):
         return await asyncio.to_thread(agent_client.model_fit, model, runtime)
     except agent_client.AgentError:
         return {"ok": False, "reason": "unavailable"}
+
+
+VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
+REPO_BASE = "https://github.com/Ga0512/SursumAI"
+
+
+def _local_version() -> str:
+    try:
+        return VERSION_FILE.read_text().strip() or "?"
+    except OSError:
+        return "?"
+
+
+def _latest_version() -> str:
+    try:
+        with urllib.request.urlopen(f"{REPO_BASE}/raw/main/VERSION", timeout=15) as resp:
+            return resp.read().decode().strip() or "?"
+    except Exception:
+        return "?"
+
+
+@app.get("/meta/update")
+async def meta_update():
+    """Check whether a newer SursumAI version is available."""
+    current = _local_version()
+    latest = await asyncio.to_thread(_latest_version)
+    return {
+        "current": current,
+        "latest": latest,
+        "update_available": latest not in ("?", current),
+    }
+
+
+@app.post("/meta/update")
+async def meta_update_apply():
+    """Re-run the installer in the background to update the codebase."""
+    import subprocess as sp
+    try:
+        sp.Popen(
+            ["curl", "-fsSL", f"{REPO_BASE}/raw/main/install.sh"],
+            stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"update failed to start: {e}") from e
+    return {"status": "started", "note": "SursumAI will restart after the update"}
 
 
 # ---- auth ----

@@ -61,6 +61,7 @@ async function submitAuth() {
     setSession(data);
     showView("dashboard");
     loadDeploys();
+    checkUpdate();
     if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
   } catch {
     toast("Could not reach server");
@@ -76,6 +77,39 @@ function logout() {
   authMode = "login";
 }
 
+/* ---- update check ---- */
+async function checkUpdate() {
+  try {
+    const res = await fetch(`${API}/meta/update`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const banner = document.getElementById("updateBanner");
+    if (data.update_available) {
+      document.getElementById("updateBannerText").textContent =
+        `A new version is available: ${data.current} → ${data.latest}`;
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  } catch {}
+}
+
+async function applyUpdate() {
+  const btn = document.querySelector(".update-btn");
+  btn.disabled = true;
+  btn.textContent = "Updating…";
+  try {
+    const res = await fetch(`${API}/meta/update`, { method: "POST", headers: authHeaders() });
+    if (!res.ok) { toast("Update failed to start"); btn.disabled = false; btn.textContent = "Update now"; return; }
+    toast("Updating… SursumAI will restart in a few minutes. Refresh when it's back.");
+    document.getElementById("updateBannerText").textContent = "Updating… reload the page when SursumAI is back up.";
+  } catch {
+    toast("Could not reach server");
+    btn.disabled = false;
+    btn.textContent = "Update now";
+  }
+}
+
 function restoreSession() {
   if (!getToken()) return;
   fetch(`${API}/auth/me`, { headers: authHeaders() })
@@ -87,6 +121,7 @@ function restoreSession() {
       u.classList.remove("hidden");
       showView("dashboard");
       loadDeploys();
+      checkUpdate();
       if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
     })
     .catch(() => {});
@@ -625,6 +660,7 @@ async function pollUntilHealthy(id) {
       closeModal();
       showView("dashboard");
       loadDeploys();
+      checkUpdate();
       if (d.status === "failed") {
         const err = d.error || "Deploy failed";
         toast(err.length > 90 ? err.slice(0, 90) + "…" : err);
