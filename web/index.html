@@ -146,7 +146,7 @@
       <div class="dash-head">
         <div class="dash-tabs">
           <button class="dash-tab active" data-view="deploys" onclick="switchDash('deploys')">Deployments</button>
-          <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Chat</button>
+          <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Playground</button>
         </div>
         <div>
           <button class="btn btn-ghost hidden" id="poolBtn" onclick="openPoolModal()">+ Pool</button>
@@ -160,14 +160,14 @@
         <div class="chat-area">
           <div class="chat-head">
             <div class="chat-pool-row">
-              <label>Pool</label>
-              <select id="chatPool" class="input" onchange="chatPoolChanged()"></select>
-              <span class="chat-hint">Messages are routed automatically to the best model.</span>
+              <label>Target</label>
+              <select id="chatTarget" class="input" onchange="chatTargetChanged()"></select>
+              <span class="chat-hint">Test a model directly, or a pool that routes for you.</span>
             </div>
             <button class="btn btn-ghost" onclick="newChat()">New chat</button>
           </div>
           <div id="chatMessages" class="chat-messages">
-            <div class="play-empty">Pick a pool and start chatting. The router picks the model.</div>
+            <div class="play-empty">Pick a model or a pool and start chatting.</div>
           </div>
           <div class="chat-input-row">
             <textarea id="chatInput" class="input play-input" rows="2" placeholder="Type a message…"

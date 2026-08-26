@@ -659,6 +659,7 @@ function switchTab(name) {
   document.querySelectorAll("#detailModal .tab-pane").forEach((p) =>
     p.classList.toggle("active", p.id === "tab-" + name));
   if (name === "code") renderSnippets();
+  if (name === "test") renderPlayHistory();
 }
 
 async function refreshDetail() {
@@ -719,12 +720,16 @@ function fmtInt(n) {
   return n == null ? "—" : String(n);
 }
 
-/* ---- playground ---- */
-const playHistory = [];
+/* ---- playground (deploy detail) ---- */
+const playHistories = {};   // deployId -> [{role, content}]
 let playImageData = null;
 let playIsVision = false;
 let playController = null;
 let playStreaming = false;
+
+function getPlayHistory() {
+  return (playHistories[detailId] = playHistories[detailId] || []);
+}
 
 function enablePlayground(d) {
   document.getElementById("playInput").disabled = false;
@@ -732,6 +737,22 @@ function enablePlayground(d) {
   playIsVision = !!(d.preflight || []).find((c) => c.name === "vision" && c.ok);
   document.getElementById("playAttach").disabled = !playIsVision;
   if (!playIsVision) removePlayImage();
+}
+
+function renderPlayHistory() {
+  const box = document.getElementById("playMessages");
+  const history = getPlayHistory();
+  box.innerHTML = history.length
+    ? ""
+    : '<div class="play-empty">Send a message to test this model.</div>';
+  for (const m of history) {
+    const div = document.createElement("div");
+    div.className = `msg ${m.role === "user" ? "user" : "assistant"}`;
+    div.innerHTML = `<div class="role">${m.role === "user" ? "You" : "Assistant"}</div>` +
+      `<div class="content">${escapeHtml(m.content)}</div>`;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 function disablePlayground(status) {
@@ -796,8 +817,7 @@ async function sendPlay() {
         { type: "image_url", image_url: { url: playImageData } },
       ]
     : text;
-  playHistory.push({ role: "user", content });
-  removePlayImage();
+  getPlayHistory().push({ role: "user", content });
   const sendBtn = document.getElementById("playSend");
   const stopBtn = document.getElementById("playStop");
   sendBtn.disabled = true;
@@ -808,7 +828,7 @@ async function sendPlay() {
     const res = await fetch(`${API}/deploys/${detailId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ messages: playHistory, max_tokens: 2048, stream: true }),
+      body: JSON.stringify({ messages: getPlayHistory(), max_tokens: 2048, stream: true }),
       signal: playController.signal,
     });
     if (!res.ok) {
@@ -862,7 +882,7 @@ async function sendPlay() {
       contentEl.textContent = "(no content)";
     }
     if (contentEl.textContent) {
-      playHistory.push({ role: "assistant", content: contentEl.textContent });
+      getPlayHistory().push({ role: "assistant", content: contentEl.textContent });
     }
     const ctx = usage ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) : 0;
     const meta = usage
@@ -894,7 +914,7 @@ function stopPlay() {
 }
 
 function clearPlay() {
-  playHistory.length = 0;
+  if (detailId) delete playHistories[detailId];
   document.getElementById("playMessages").innerHTML =
     '<div class="play-empty">Memory cleared. The model forgot this conversation.</div>';
 }
@@ -987,27 +1007,40 @@ async function loadPools() {
 }
 
 async function loadChat() {
-  const pools = await loadPools();
-  const sel = document.getElementById("chatPool");
+  const [pools, deploys] = await Promise.all([
+    loadPools(),
+    fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json()),
+  ]);
+  const healthy = deploys.filter((d) => d.status === "healthy");
+  const sel = document.getElementById("chatTarget");
   const prev = sel.value;
-  sel.innerHTML = pools.length
-    ? pools.map((p) => `<option value="${p.id}">${p.name} (${p.mode || "escalation"})</option>`).join("")
-    : '<option value="">No pools yet</option>';
-  if (prev && pools.some((p) => p.id === prev)) sel.value = prev;
-  const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
-  const hasHealthy = deploys.some((d) => d.status === "healthy");
-  document.getElementById("poolBtn").classList.toggle("hidden", !hasHealthy);
-  const hasPool = pools.length > 0;
-  document.getElementById("chatInput").disabled = !hasPool;
-  document.getElementById("chatSend").disabled = !hasPool;
-  if (!hasPool) {
+  const poolOpts = pools.length
+    ? pools.map((p) => `<option value="pool:${p.id}">Pool: ${p.name} (${p.mode || "escalation"})</option>`).join("")
+    : "";
+  const modelOpts = healthy.length
+    ? healthy.map((d) => `<option value="${d.id}">Model: ${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("")
+    : '<option value="">No healthy models yet</option>';
+  sel.innerHTML = (poolOpts ? `<optgroup label="Pools">${poolOpts}</optgroup>` : "") +
+    `<optgroup label="Models">${modelOpts}</optgroup>`;
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  document.getElementById("poolBtn").classList.toggle("hidden", !healthy.length);
+  const hasTarget = !!sel.value;
+  document.getElementById("chatInput").disabled = !hasTarget;
+  document.getElementById("chatSend").disabled = !hasTarget;
+  if (!hasTarget) {
     document.getElementById("chatMessages").innerHTML =
-      `<div class="play-empty">Create a pool to start routing. A pool pairs a fast model (weak) with a smarter one (strong).</div>`;
+      `<div class="play-empty">Deploy a model to test it, or create a pool to route between models.</div>`;
+  } else if (prev !== sel.value) {
+    renderChatHistory(sel.value);
   }
 }
 
-function chatPoolChanged() {
-  newChat();
+function chatTargetChanged() {
+  const target = document.getElementById("chatTarget").value;
+  const hasTarget = !!target;
+  document.getElementById("chatInput").disabled = !hasTarget;
+  document.getElementById("chatSend").disabled = !hasTarget;
+  if (target) renderChatHistory(target);
 }
 
 let poolHealthyDeploys = [];
@@ -1061,10 +1094,15 @@ async function createPool() {
   loadChat();
 }
 
-/* ---- chat (router) ---- */
-let chatHistory = [];
-let chatSessionId = null;
+/* ---- chat / playground (model or pool) ---- */
+const chatHistories = {};   // target -> [{role, content}]
+const chatSessions = {};    // pool target -> session_id
 let chatController = null;
+
+function chatTargetLabel(t) {
+  if (t.startsWith("pool:")) return t.slice(5);
+  return t.slice(0, 8) + "…";
+}
 
 function addChatMsg(role, html, routeTag, routeClass) {
   const box = document.getElementById("chatMessages");
@@ -1078,37 +1116,54 @@ function addChatMsg(role, html, routeTag, routeClass) {
   box.scrollTop = box.scrollHeight;
 }
 
+function renderChatHistory(target) {
+  const box = document.getElementById("chatMessages");
+  const history = chatHistories[target] || [];
+  box.innerHTML = history.length
+    ? ""
+    : `<div class="play-empty">New chat. Ask ${target.startsWith("pool:") ? "the pool" : "the model"} anything.</div>`;
+  for (const m of history) {
+    const div = document.createElement("div");
+    div.className = `msg ${m.role === "user" ? "user" : "assistant"}`;
+    div.innerHTML = `<div class="role">${m.role === "user" ? "You" : "Assistant"}</div>` +
+      `<div class="content">${escapeHtml(m.content)}</div>`;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
 function newChat() {
-  chatHistory = [];
-  chatSessionId = null;
+  const target = document.getElementById("chatTarget").value;
+  if (target) chatHistories[target] = [];
   document.getElementById("chatMessages").innerHTML =
-    `<div class="play-empty">New chat. The router will pick the model for each message.</div>`;
+    `<div class="play-empty">New chat. Ask ${target && target.startsWith("pool:") ? "the pool" : "the model"} anything.</div>`;
 }
 
 async function sendChat() {
   const input = document.getElementById("chatInput");
   const text = input.value.trim();
-  const poolId = document.getElementById("chatPool").value;
-  if (!text || !poolId) return;
+  const target = document.getElementById("chatTarget").value;
+  if (!text || !target) return;
   input.value = "";
   addChatMsg("user", `<div class="content">${escapeHtml(text)}</div>`);
-  chatHistory.push({ role: "user", content: text });
+  const history = (chatHistories[target] = chatHistories[target] || []);
+  history.push({ role: "user", content: text });
   const sendBtn = document.getElementById("chatSend");
   const stopBtn = document.getElementById("chatStop");
   sendBtn.disabled = true;
   stopBtn.classList.remove("hidden");
   chatController = new AbortController();
+  const isPool = target.startsWith("pool:");
   try {
-    const res = await fetch(`${API}/v1/chat/completions`, {
+    const url = isPool ? `${API}/v1/chat/completions` : `${API}/deploys/${target}/chat`;
+    const body = isPool
+      ? { model: target.slice(5), messages: history, max_tokens: 2048, stream: true,
+          session_id: chatSessions[target] || undefined }
+      : { messages: history, max_tokens: 2048, stream: true };
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({
-        model: poolId,
-        messages: chatHistory,
-        max_tokens: 2048,
-        stream: true,
-        session_id: chatSessionId || undefined,
-      }),
+      body: JSON.stringify(body),
       signal: chatController.signal,
     });
     if (!res.ok) {
@@ -1120,8 +1175,9 @@ async function sendChat() {
     const box = document.getElementById("chatMessages");
     const div = document.createElement("div");
     div.className = "msg assistant";
-    div.innerHTML = '<div class="role">Assistant</div><div class="content"></div>';
+    div.innerHTML = '<div class="role">Assistant</div><div class="think hidden"></div><div class="content"></div>';
     box.appendChild(div);
+    const thinkEl = div.querySelector(".think");
     const contentEl = div.querySelector(".content");
 
     const reader = res.body.getReader();
@@ -1143,18 +1199,25 @@ async function sendChat() {
           try {
             const obj = JSON.parse(data);
             if (obj.error) { addChatMsg("error", `<div class="content">${escapeHtml(obj.error)}</div>`); return; }
-            if (obj.session_id) chatSessionId = obj.session_id;
+            if (obj.session_id && isPool) chatSessions[target] = obj.session_id;
             servedModel = obj.model || servedModel;
             const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
-            if (delta && delta.content) contentEl.textContent += delta.content;
+            if (!delta) continue;
+            if (delta.reasoning_content) {
+              thinkEl.classList.remove("hidden");
+              thinkEl.textContent += delta.reasoning_content;
+            }
+            if (delta.content) contentEl.textContent += delta.content;
             box.scrollTop = box.scrollHeight;
           } catch {}
         }
       }
     }
-    if (!contentEl.textContent) contentEl.textContent = "(no content)";
-    if (contentEl.textContent) chatHistory.push({ role: "assistant", content: contentEl.textContent });
-    if (servedModel) {
+    if (!contentEl.textContent && thinkEl.classList.contains("hidden")) {
+      contentEl.textContent = "(no content)";
+    }
+    if (contentEl.textContent) history.push({ role: "assistant", content: contentEl.textContent });
+    if (servedModel && isPool) {
       const tag = document.createElement("div");
       tag.className = "route-tag";
       tag.textContent = servedModel;

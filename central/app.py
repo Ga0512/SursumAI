@@ -509,8 +509,11 @@ async def pool_log(pool_id: str, user=Depends(_current_user)):
 # ---- OpenAI-compatible router endpoint ----
 
 def _openai_chunk(created: int, model: str, content: str | None = None,
+                  reasoning: str | None = None,
                   finish: str | None = None) -> dict:
     delta: dict = {"role": "assistant"}
+    if reasoning is not None:
+        delta["reasoning_content"] = reasoning
     if content is not None:
         delta["content"] = content
     chunk: dict = {
@@ -543,6 +546,10 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
     elif outcome["decision"] == "latched":
         served_model = f"{pool.name} (strong, latched)"
     content = outcome["content"]
+    reasoning = outcome.get("reasoning") or ""
+    if reasoning:
+        for piece in (reasoning[: i + 80] for i in range(0, len(reasoning), 80)):
+            yield f"data: {json.dumps(_openai_chunk(created, served_model, reasoning=piece))}\n\n"
     for piece in (content[: i + 80] for i in range(0, len(content), 80)):
         yield f"data: {json.dumps(_openai_chunk(created, served_model, piece))}\n\n"
     final = _openai_chunk(created, served_model, finish="stop")
@@ -624,12 +631,15 @@ async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
         raise HTTPException(status_code=502, detail=str(e)) from e
     store.log_router(session.id, pool.id, user.id, outcome["served"],
                      outcome["decision"], outcome["usage"].get("total_tokens", 0), 0)
+    message: dict = {"role": "assistant", "content": outcome["content"]}
+    if outcome.get("reasoning"):
+        message["reasoning_content"] = outcome["reasoning"]
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
         "object": "chat.completion",
         "created": created,
         "model": f"{pool.name} ({outcome['decision']})",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": outcome["content"]},
+        "choices": [{"index": 0, "message": message,
                      "finish_reason": "stop"}],
         "usage": outcome["usage"],
         "session_id": session.id,

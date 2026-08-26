@@ -48,6 +48,13 @@ def _content_of(result: dict) -> str:
         return ""
 
 
+def _reasoning_of(result: dict) -> str:
+    try:
+        return result["choices"][0]["message"].get("reasoning_content") or ""
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
 def _usage_of(result: dict) -> dict:
     return result.get("usage") or {}
 
@@ -150,6 +157,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
             "served": strong.id,
             "decision": _decision_label(True, False, strong.id),
             "content": _content_of(result),
+            "reasoning": _reasoning_of(result),
             "usage": _usage_of(result),
             "latched": True,
         }
@@ -168,6 +176,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
                 "served": strong.id,
                 "decision": "escalated",
                 "content": _content_of(result),
+                "reasoning": _reasoning_of(result),
                 "usage": _usage_of(result),
                 "latched": True,
             }
@@ -176,6 +185,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
             "served": weak.id,
             "decision": "weak_bad",
             "content": weak_content,
+            "reasoning": _reasoning_of(weak_result),
             "usage": _usage_of(weak_result),
             "latched": False,
         }
@@ -191,6 +201,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
                 "served": strong.id,
                 "decision": "escalated",
                 "content": _content_of(result),
+                "reasoning": _reasoning_of(result),
                 "usage": _usage_of(result),
                 "latched": True,
             }
@@ -199,6 +210,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
             "served": weak.id,
             "decision": "weak_ok",
             "content": weak_content,
+            "reasoning": _reasoning_of(weak_result),
             "usage": _usage_of(weak_result),
             "latched": False,
         }
@@ -209,6 +221,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
         "served": weak.id,
         "decision": "weak_ok",
         "content": weak_content,
+        "reasoning": _reasoning_of(weak_result),
         "usage": _usage_of(weak_result),
         "latched": False,
     }
@@ -256,6 +269,7 @@ def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
             "served": strong.id,
             "decision": "latched",
             "content": _content_of(result),
+            "reasoning": _reasoning_of(result),
             "usage": _usage_of(result),
             "latched": True,
         }
@@ -268,6 +282,7 @@ def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
         "served": weak.id,
         "decision": "advisor",
         "content": weak_content,
+        "reasoning": _reasoning_of(weak_result),
         "usage": _usage_of(weak_result),
         "latched": False,
     }
@@ -293,6 +308,7 @@ def route_stage(store: Store, pool, session: RouterSession, user_id: str,
             "served": strong.id,
             "decision": "strong",
             "content": _content_of(result),
+            "reasoning": _reasoning_of(result),
             "usage": _usage_of(result),
             "latched": session.latched,
         }
@@ -304,6 +320,7 @@ def route_stage(store: Store, pool, session: RouterSession, user_id: str,
         "served": weak.id,
         "decision": "weak",
         "content": _content_of(result),
+        "reasoning": _reasoning_of(result),
         "usage": _usage_of(result),
         "latched": False,
     }
@@ -332,6 +349,7 @@ def route_round_robin(store: Store, pool, session: RouterSession, user_id: str,
         "served": target.id,
         "decision": decision,
         "content": _content_of(result),
+        "reasoning": _reasoning_of(result),
         "usage": _usage_of(result),
         "latched": False,
     }
@@ -405,6 +423,7 @@ def route_classifier(store: Store, pool, session: RouterSession, user_id: str,
         "served": chosen.id,
         "decision": "classifier",
         "content": _content_of(result),
+        "reasoning": _reasoning_of(result),
         "usage": _usage_of(result),
         "latched": False,
     }
