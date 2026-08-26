@@ -1021,6 +1021,9 @@ async function loadChat() {
   const poolOpts = pools.length
     ? pools.map((p) => `<option value="pool:${p.id}">Pool: ${p.name} (${p.mode || "escalation"})</option>`).join("")
     : "";
+  const modelOpts = healthy.length
+    ? healthy.map((d) => `<option value="${d.id}">Model: ${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("")
+    : '<option value="">No healthy models yet</option>';
   sel.innerHTML = (poolOpts ? `<optgroup label="Pools">${poolOpts}</optgroup>` : "") +
     `<optgroup label="Models">${modelOpts}</optgroup>`;
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
