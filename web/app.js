@@ -1040,7 +1040,36 @@ function chatTargetChanged() {
   const hasTarget = !!target;
   document.getElementById("chatInput").disabled = !hasTarget;
   document.getElementById("chatSend").disabled = !hasTarget;
+  const apiRow = document.getElementById("chatApiRow");
+  const apiUrl = document.getElementById("chatApiUrl");
+  if (!target) { apiRow.classList.add("hidden"); return; }
+  if (target.startsWith("pool:")) {
+    apiUrl.textContent = `POST /v1/chat/completions  { "model": "${target.slice(5)}", "messages": [...] }`;
+  } else {
+    apiUrl.textContent = `POST /deploys/${target}/chat  (${target.slice(0, 8)}…)`;
+  }
+  apiRow.classList.remove("hidden");
   if (target) renderChatHistory(target);
+}
+
+function copyChatApi() {
+  const target = document.getElementById("chatTarget").value;
+  if (!target) return;
+  const snippet = target.startsWith("pool:")
+    ? `curl -X POST http://localhost:8001/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -d '{"model": "${target.slice(5)}", "messages": [{"role": "user", "content": "Hello!"}]}'`
+    : `curl -X POST http://localhost:8001/deploys/${target}/chat \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -d '{"messages": [{"role": "user", "content": "Hello!"}]}'`;
+  const done = () => toast("API snippet copied!");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(snippet).then(done).catch(() => toast(snippet.slice(0, 80) + "…"));
+  } else {
+    toast(snippet.slice(0, 80) + "…");
+  }
 }
 
 let poolHealthyDeploys = [];
