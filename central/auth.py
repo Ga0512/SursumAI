@@ -42,8 +42,29 @@ def hash_token(token: str) -> str:
 
 
 def new_deploy_key() -> str:
-    """Bearer key for a single deployment's own OpenAI-compatible endpoint."""
-    return "sk-sursum-" + secrets.token_urlsafe(24)
+    """Internal lock between the central and one model process.
+
+    Never shown to the user: it exists so nothing else on the machine can talk
+    to the model's port. What the user holds is an account API key.
+    """
+    return "sk-internal-" + secrets.token_urlsafe(24)
+
+
+API_KEY_PREFIX = "sk-sursum-"
+
+
+def new_api_key() -> str:
+    """An account API key: what the user actually puts in their client."""
+    return API_KEY_PREFIX + secrets.token_urlsafe(32)
+
+
+def looks_like_api_key(value: str) -> bool:
+    return value.startswith(API_KEY_PREFIX)
+
+
+def key_display(key: str) -> str:
+    """The part safe to store and show so a key is recognisable in a list."""
+    return key[:len(API_KEY_PREFIX) + 4] + "…" + key[-4:]
 
 
 def session_expiry() -> float:

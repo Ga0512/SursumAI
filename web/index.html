@@ -152,6 +152,7 @@
           <button class="dash-tab active" data-view="deploys" onclick="switchDash('deploys')">Deployments</button>
           <button class="dash-tab" data-view="pools" onclick="switchDash('pools')">Pools</button>
           <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Playground</button>
+          <button class="dash-tab" data-view="keys" onclick="switchDash('keys')">API keys</button>
         </div>
         <div>
           <button class="btn btn-ghost hidden" id="poolBtn" onclick="openPoolModal()">+ Pool</button>
@@ -163,6 +164,32 @@
       </div>
       <div id="poolsView" class="hidden">
         <div id="poolsGrid" class="sursum-grid"></div>
+      </div>
+      <div id="keysView" class="hidden">
+        <div class="keys-intro">
+          <p>One key works for every model and pool in your account — the same way
+             you use an OpenAI or Anthropic key.</p>
+          <div class="keys-base">
+            <span class="kv-label">Base URL</span>
+            <code class="url" id="keysBaseUrl">http://localhost:8001/v1</code>
+            <button class="btn btn-ghost btn-sm"
+                    onclick="copyUrl(document.getElementById('keysBaseUrl').textContent)">Copy</button>
+          </div>
+        </div>
+        <div class="keys-new">
+          <input class="input" id="keyName" placeholder="What is this key for? (e.g. my laptop)"
+                 maxlength="60" onkeydown="if(event.key==='Enter')createApiKey()">
+          <button class="btn btn-primary" onclick="createApiKey()">Create key</button>
+        </div>
+        <div id="keyReveal" class="key-reveal hidden">
+          <div class="key-reveal-head">Copy it now — it is not shown again.</div>
+          <div class="key-reveal-row">
+            <code id="keyRevealValue"></code>
+            <button class="btn btn-primary btn-sm" onclick="copyNewKey()">Copy</button>
+            <button class="btn btn-ghost btn-sm" onclick="dismissNewKey()">Done</button>
+          </div>
+        </div>
+        <div id="keysList" class="keys-list"></div>
       </div>
       <div id="chatView" class="hidden">
         <div class="chat-area">
@@ -326,12 +353,7 @@
           <code class="url" id="detailUrl">—</code>
           <button class="btn btn-ghost btn-sm" onclick="copyUrl(document.getElementById('detailUrl').textContent)">Copy</button>
         </div>
-        <div class="kv-row">
-          <span class="kv-label">API key</span>
-          <code class="url" id="detailKey">—</code>
-          <button class="btn btn-ghost btn-sm" id="detailKeyReveal" onclick="toggleKey()">Show</button>
-          <button class="btn btn-ghost btn-sm" onclick="copyKey()">Copy</button>
-        </div>
+
         <div class="metrics-grid" id="detailMetricsGrid"></div>
         <div class="spark-row">
           <span class="spark-label">Output tokens / s</span>

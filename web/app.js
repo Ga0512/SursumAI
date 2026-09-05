@@ -562,48 +562,91 @@ async function copyUrl(url) {
   catch { toast(url); }
 }
 
-/* ---- the deployment's API key ----
-   Held in memory only, shown masked: the modal is the sort of thing people
-   leave open while screen-sharing. */
-let detailKey = "";
-let detailKeyVisible = false;
+/* ---- account API keys ----
+   One key for the whole account, like every other model provider. The
+   plaintext exists only in this page, only right after it is minted. */
+let newKey = "";
 
-function maskKey(key) {
-  // keep the prefix so it is recognisable, and the tail so it can be matched
-  // against a key someone already has, without showing the secret itself
-  if (key.length <= 14) return "•".repeat(key.length);
-  return key.slice(0, 10) + "•".repeat(12) + key.slice(-4);
-}
-
-function setDetailKey(key) {
-  detailKey = key;
-  detailKeyVisible = false;
-  renderDetailKey();
-}
-
-function renderDetailKey() {
-  const el = document.getElementById("detailKey");
-  const btn = document.getElementById("detailKeyReveal");
-  if (!el) return;
-  if (!detailKey) {
-    el.textContent = "— (redeploy to get one)";
-    if (btn) btn.style.display = "none";
+async function loadApiKeys() {
+  const list = document.getElementById("keysList");
+  let keys = [];
+  try {
+    const res = await fetch(`${API}/api-keys`, { headers: authHeaders() });
+    if (res.ok) keys = await res.json();
+  } catch {
+    list.innerHTML = `<div class="keys-empty">Could not reach the server.</div>`;
     return;
   }
-  if (btn) btn.style.display = "";
-  el.textContent = detailKeyVisible ? detailKey : maskKey(detailKey);
-  if (btn) btn.textContent = detailKeyVisible ? "Hide" : "Show";
+  document.getElementById("keysBaseUrl").textContent = `${API}/v1`;
+  if (!keys.length) {
+    list.innerHTML = `<div class="keys-empty">No keys yet. Create one to call your
+      models from anywhere.</div>`;
+    return;
+  }
+  list.innerHTML = keys.map((k) => `
+    <div class="key-row">
+      <div class="key-main">
+        <div class="key-name">${escapeHtml(k.name)}</div>
+        <code class="key-display">${k.display}</code>
+      </div>
+      <div class="key-meta">
+        <span>created ${shortDate(k.created_at)}</span>
+        <span>${k.last_used_at ? "last used " + shortDate(k.last_used_at) : "never used"}</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="revokeApiKey('${k.id}', '${escapeHtml(k.name)}')">Revoke</button>
+    </div>`).join("");
 }
 
-function toggleKey() {
-  detailKeyVisible = !detailKeyVisible;
-  renderDetailKey();
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text ?? "";
+  return div.innerHTML;
 }
 
-async function copyKey() {
-  if (!detailKey) { toast("This deployment has no API key — redeploy it"); return; }
-  try { await navigator.clipboard.writeText(detailKey); toast("API key copied!"); }
-  catch { toast("Could not copy — use Show and select it"); }
+function shortDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+}
+
+async function createApiKey() {
+  const input = document.getElementById("keyName");
+  const name = input.value.trim();
+  const res = await fetch(`${API}/api-keys`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    toast(body.detail || "Could not create the key");
+    return;
+  }
+  const created = await res.json();
+  newKey = created.key;
+  input.value = "";
+  document.getElementById("keyRevealValue").textContent = newKey;
+  document.getElementById("keyReveal").classList.remove("hidden");
+  loadApiKeys();
+}
+
+async function copyNewKey() {
+  try { await navigator.clipboard.writeText(newKey); toast("API key copied!"); }
+  catch { toast("Could not copy — select it by hand"); }
+}
+
+function dismissNewKey() {
+  newKey = "";
+  document.getElementById("keyRevealValue").textContent = "";
+  document.getElementById("keyReveal").classList.add("hidden");
+}
+
+async function revokeApiKey(id, name) {
+  if (!confirm(`Revoke "${name}"? Anything using it stops working immediately.`)) return;
+  const res = await fetch(`${API}/api-keys/${id}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  toast(res.ok ? "Key revoked" : "Could not revoke the key");
+  loadApiKeys();
 }
 
 async function destroy(id) {
@@ -734,7 +777,6 @@ function openDetail(id) {
 function closeDetail() {
   if (detailTimer) { clearInterval(detailTimer); detailTimer = null; }
   detailId = null;
-  setDetailKey("");  // never leave one deployment's key on screen for the next
   document.getElementById("detailModal").classList.add("hidden");
 }
 
@@ -765,7 +807,6 @@ function renderDetailMetrics(d) {
   st.className = `status ${d.status}`;
   st.innerHTML = `<span class="dot"></span>${STATUS_LABEL[d.status] || d.status}`;
   document.getElementById("detailUrl").textContent = d.endpoint || "…";
-  setDetailKey(d.spec.api_key || "");
 
   const m = d.metrics;
   if (!m || d.status !== "healthy") {
@@ -1017,43 +1058,39 @@ function switchLang(lang) {
 }
 
 function buildSnippets(d) {
-  const url = d.endpoint ? d.endpoint.replace(/\/v1$/, "") : "http://localhost:YOUR_PORT";
+  // the account's key and the central's URL: the deployment's own port and
+  // internal key are implementation details the user never has to touch
+  const url = API;
   const model = d.spec.model;
-  // every deploy is started with its own --api-key: the snippets have to send it
-  const key = d.spec.api_key || "YOUR_API_KEY";
-  const python = `import requests
+  const python = `from openai import OpenAI
 
-url = "${url}/v1/chat/completions"
-headers = {"Authorization": "Bearer ${key}"}
-payload = {
-    "model": "${model}",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 512,
-}
+client = OpenAI(base_url="${url}/v1", api_key="YOUR_SURSUMAI_KEY")
 
-resp = requests.post(url, json=payload, headers=headers, timeout=120)
-resp.raise_for_status()
-print(resp.json()["choices"][0]["message"]["content"])`;
+resp = client.chat.completions.create(
+    model="${model}",
+    messages=[{"role": "user", "content": "Hello!"}],
+    max_tokens=512,
+)
+print(resp.choices[0].message.content)`;
 
-  const js = `const resp = await fetch("${url}/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: "Bearer ${key}",
-  },
-  body: JSON.stringify({
-    model: "${model}",
-    messages: [{ role: "user", content: "Hello!" }],
-    max_tokens: 512,
-  }),
+  const js = `import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "${url}/v1",
+  apiKey: "YOUR_SURSUMAI_KEY",
 });
 
-const data = await resp.json();
-console.log(data.choices[0].message.content);`;
+const resp = await client.chat.completions.create({
+  model: "${model}",
+  messages: [{ role: "user", content: "Hello!" }],
+  max_tokens: 512,
+});
+
+console.log(resp.choices[0].message.content);`;
 
   const curl = `curl ${url}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer ${key}" \\
+  -H "Authorization: Bearer $SURSUMAI_KEY" \\
   -d '{
     "model": "${model}",
     "messages": [{"role": "user", "content": "Hello!"}],
@@ -1090,8 +1127,10 @@ function switchDash(view) {
   document.getElementById("deploysView").classList.toggle("hidden", view !== "deploys");
   document.getElementById("poolsView").classList.toggle("hidden", view !== "pools");
   document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
+  document.getElementById("keysView").classList.toggle("hidden", view !== "keys");
   if (view === "chat") loadChat();
   if (view === "pools") loadPoolsView();
+  if (view === "keys") loadApiKeys();
 }
 
 async function loadPoolsView() {

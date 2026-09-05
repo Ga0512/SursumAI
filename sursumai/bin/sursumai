@@ -13,7 +13,7 @@ Commands:
   sursumai logout        remove the stored token
   sursumai list          table of deploys
   sursumai deploy <model> [--runtime vllm|llama] [--gpus N] [--no-wait]
-  sursumai key <id>      print the deploy's API key
+  sursumai keys          list account API keys (--create NAME, --revoke ID)
   sursumai logs <id> [--tail N] [--follow]
   sursumai chat <id|pool:name> [prompt]
   sursumai pools         table of pools
@@ -355,13 +355,31 @@ def cmd_pools(args: argparse.Namespace) -> None:
         print(f"{p['id']:34} {p.get('mode', ''):12} {n:<7} {p['name']}")
 
 
-def cmd_key(args: argparse.Namespace) -> None:
+def cmd_keys(args: argparse.Namespace) -> None:
+    """Account API keys: one key works for every model you own."""
     token = _load_token()
-    deploy = _resolve_deploy(args.deploy_id, token)
-    key = (deploy.get("spec") or {}).get("api_key") or ""
-    if not key:
-        raise CliError("this deploy has no API key (created before keys existed) — redeploy it")
-    print(key)
+    if args.revoke:
+        _http("DELETE", f"/api-keys/{args.revoke}", token=token)
+        ok(f"revoked {args.revoke}")
+        return
+    if args.create is not None:
+        name = args.create or "cli"
+        created = _http("POST", "/api-keys", {"name": name}, token)[1]
+        ok(f"created '{created['name']}' — copy it now, it is not shown again:")
+        print(created["key"])
+        return
+    keys = _get("/api-keys", token)
+    if emit(keys, args.json):
+        return
+    if not keys:
+        print("no API keys — create one with `sursumai keys --create <name>`")
+        return
+    hdr = f"{'ID':34} {'KEY':24} {'LAST USED':12} NAME"
+    print(hdr)
+    print("-" * len(hdr))
+    for k in keys:
+        used = (k.get("last_used_at") or "never")[:10]
+        print(f"{k['id']:34} {k['display']:24} {used:12} {k['name']}")
 
 
 def cmd_deploy(args: argparse.Namespace) -> None:
@@ -401,9 +419,7 @@ def _wait_for_deploy(deploy_id: str, token: str, timeout: int) -> None:
             last = line
         if status == "healthy":
             ok(f"healthy — endpoint: {d.get('endpoint') or '(none)'}")
-            key = (d.get("spec") or {}).get("api_key")
-            if key:
-                print(f"  api key: {key}")
+            print("  call it with your account key: sursumai keys --create")
             return
         if status == "failed":
             raise CliError(f"deploy failed: {d.get('error') or 'unknown reason'}")
@@ -524,7 +540,7 @@ COMMANDS = {
     "logout": cmd_logout,
     "list": cmd_list,
     "pools": cmd_pools,
-    "key": cmd_key,
+    "keys": cmd_keys,
     "deploy": cmd_deploy,
     "logs": cmd_logs,
     "chat": cmd_chat,
@@ -566,8 +582,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("pools", "list pools")
     p.add_argument("--json", action="store_true")
 
-    p_key = add("key", "print a deploy's API key")
-    p_key.add_argument("deploy_id")
+    p_keys = add("keys", "list, create or revoke account API keys")
+    p_keys.add_argument("--create", nargs="?", const="cli", metavar="NAME",
+                        help="mint a key with this name")
+    p_keys.add_argument("--revoke", metavar="ID", help="revoke a key by id")
+    p_keys.add_argument("--json", action="store_true")
 
     p_deploy = add("deploy", "create a deploy")
     p_deploy.add_argument("model")

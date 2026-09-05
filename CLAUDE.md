@@ -68,6 +68,10 @@ web/server.py (3000, estático + proxy /api) ──► central/app.py (8001) ─
 - GGUF vai para `llama-models/<org>--<model>/`, magic bytes `GGUF` validados. VLM detectado por `mmproj-*.gguf`.
 - `llama-bin/`, `llama-models/`, `sursumai.db*` e `sursumai-logs/` são ignorados pelo git.
 
+### Endereçamento OpenAI
+
+Uma URL só (`http://localhost:8001/v1`) e o `model` decide quem responde. `_resolve_target()` resolve nesta ordem, para nunca ficar ambíguo: `router`/`auto` → pool padrão; id exato de deploy; id ou nome de pool; nome do modelo (`Qwen/Qwen3-0.6B-GGUF`). Modelo desconhecido devolve 404 listando o que existe; modelo não pronto devolve 422 com o status. `/v1/models` lista deployments, pools e `router`.
+
 ### Router (pools)
 
 `central/router.py`: um pool junta 2+ deploys e responde em `POST /v1/chat/completions` com `model="router"`. Modos: `escalation` (juiz LLM escala para o forte; latch após 2 escalações), `classifier` (juiz escolhe 1 entre N), `advisor` (juiz roda em background, vale no próximo turno), `stage` (regras por keyword, sem LLM), `round_robin`. Estado por conversa vem do `session_id` do cliente, expira em 1h, persistido em `router_sessions`; decisões em `router_log` (visíveis no modal do pool).
@@ -107,10 +111,12 @@ Retenção: `save_metrics` poda para os últimos `Store.METRICS_KEEP` snapshots 
 
 Email + senha com PBKDF2 (`central/auth.py`), sessões com token bearer via `HTTPBearer` (header `Authorization`, **não** `X-Auth`). `user_id` é o ponto em comum de todos os dados (deploys, pools, métricas). O token é guardado **hasheado** (`sessions.token_hash`, sha256) — a migração dropa a tabela antiga e todo mundo loga de novo uma vez.
 
-Três segredos, três donos:
+Quatro segredos, quatro donos:
+
+- **API key da conta** (`api_keys`, prefixo `sk-sursum-`) é o que o usuário usa: uma ou várias, nomeadas, revogáveis, guardadas com sha256 e mostradas em texto puro uma única vez. Vale para todos os modelos e pools da conta — chave por deployment estava errado, ninguém tem uma chave por modelo na OpenAI ou na Anthropic. **Escopo é só `/v1`**: `_api_user` aceita chave ou sessão; `_current_user` (gerenciamento) recusa chave com 403, para que uma chave vazada de um script não consiga destruir deployment nem criar outra chave.
 
 - **`AGENT_KEY`** (`core/keys.py`) protege o agent. Gerada aleatória no 1º run em `~/.sursumai/agent.key` (0600); `AGENT_KEY` no ambiente ganha. Comparação sempre por `hmac.compare_digest`. O agent recusa subir com a chave de dev fora de loopback, e a checagem é um **middleware** — como dependência ela rodava depois da validação do corpo, devolvendo 422 antes de 401.
-- **`Spec.api_key`** protege cada deploy: gerada em `POST /deploys`. Toda chamada ao endpoint do deploy (playground, router, judge, health probe, métricas) manda esse bearer; os specs ficam em `~/.sursumai/specs/` (0600) para sobreviver a um restart do agent. **Nunca colocar a chave em argv** — `" ".join(cmd)` vai para o log do deploy, que o README manda o usuário abrir quando algo falha, e argv é legível em `/proc/<PID>/cmdline`. llama-server lê de `--api-key-file` (arquivo 0600 em `~/.sursumai/deploys/`, montado read-only no container); vLLM não tem essa opção e recebe por `-e VLLM_API_KEY` (flag `-e` sem valor: o docker herda do processo chamador). O `-e`/`-v` tem que vir **antes** da imagem — depois dela tudo é argumento do servidor do modelo.
+- **`Spec.api_key`** (prefixo `sk-internal-`) é **interno**, nunca exposto: tranca a porta do modelo para que nada mais na máquina fale com ela. Gerada em `POST /deploys`. Toda chamada ao endpoint do deploy (playground, router, judge, health probe, métricas) manda esse bearer; os specs ficam em `~/.sursumai/specs/` (0600) para sobreviver a um restart do agent. **Nunca colocar a chave em argv** — `" ".join(cmd)` vai para o log do deploy, que o README manda o usuário abrir quando algo falha, e argv é legível em `/proc/<PID>/cmdline`. llama-server lê de `--api-key-file` (arquivo 0600 em `~/.sursumai/deploys/`, montado read-only no container); vLLM não tem essa opção e recebe por `-e VLLM_API_KEY` (flag `-e` sem valor: o docker herda do processo chamador). O `-e`/`-v` tem que vir **antes** da imagem — depois dela tudo é argumento do servidor do modelo.
 - **`auth_enforced`** no status do agent: depois de saudável, o agent faz uma sonda *sem* a chave e confirma que leva 401/403. Se um runtime ignorasse a chave, ele subiria aberto e a sonda autenticada passaria igual — controle de segurança que falha em silêncio é pior que nenhum. O central loga `error` se isso acontecer.
 - **Token de sessão** protege a API do central, como acima.
 

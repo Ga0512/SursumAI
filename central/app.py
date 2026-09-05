@@ -100,6 +100,10 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class ApiKeyRequest(BaseModel):
+    name: str = ""
+
+
 class PoolRequest(BaseModel):
     name: str
     weak_id: str | None = None
@@ -122,8 +126,33 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def _current_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    """Management access: only a browser/CLI session.
+
+    Deliberately NOT accepting an API key: a key that leaks out of somebody's
+    inference script must not be able to destroy their deployments.
+    """
     if creds is None:
         raise HTTPException(status_code=401, detail="authentication required")
+    if authmod.looks_like_api_key(creds.credentials):
+        raise HTTPException(
+            status_code=403,
+            detail="an API key can call /v1 only — log in for this",
+        )
+    user = store.get_user_by_token(creds.credentials)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid or expired token")
+    return user
+
+
+def _api_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    """Inference access: an account API key, or a logged-in session."""
+    if creds is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    if authmod.looks_like_api_key(creds.credentials):
+        user = store.get_user_by_api_key(creds.credentials)
+        if user is None:
+            raise HTTPException(status_code=401, detail="invalid or revoked API key")
+        return user
     user = store.get_user_by_token(creds.credentials)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid or expired token")
@@ -409,6 +438,32 @@ async def logout(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
 @app.get("/auth/me")
 async def me(user=Depends(_current_user)):
     return user.to_dict()
+
+
+# ---- account API keys ----
+
+@app.get("/api-keys")
+async def list_api_keys(user=Depends(_current_user)):
+    return store.list_api_keys(user.id)
+
+
+@app.post("/api-keys", status_code=201)
+async def create_api_key(req: ApiKeyRequest, user=Depends(_current_user)):
+    name = (req.name or "").strip() or "API key"
+    if len(name) > 60:
+        raise HTTPException(status_code=422, detail="name too long")
+    if len(store.list_api_keys(user.id)) >= 20:
+        raise HTTPException(status_code=422, detail="too many keys — revoke one first")
+    row, key = store.create_api_key(user.id, name)
+    # the only time the plaintext ever leaves this process
+    return {**row, "key": key}
+
+
+@app.delete("/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, user=Depends(_current_user)):
+    if not store.revoke_api_key(key_id, user.id):
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"status": "revoked"}
 
 
 # ---- deploys ----
@@ -780,6 +835,49 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
                      outcome["decision"], outcome["usage"].get("total_tokens", 0), 0)
 
 
+def _resolve_target(user: object, model: str):
+    """What should answer this request?
+
+    Returns ("deploy", deploy) or ("pool", pool). Resolution order, so a
+    request is never ambiguous: the router, then an exact id, then a pool
+    name, then a model name.
+    """
+    if model in ("router", "auto"):
+        return "pool", _resolve_pool(user, "router")
+
+    deploy = store.get(model)
+    if deploy is not None and deploy.user_id == user.id:
+        return "deploy", deploy
+
+    pool = store.get_pool(model)
+    if pool is not None and pool.user_id == user.id:
+        return "pool", pool
+
+    for candidate in store.list_pools(user.id):
+        if candidate.name == model:
+            return "pool", candidate
+
+    # a model name, the way OpenAI clients address things
+    matches = [d for d in store.list(user.id) if d.spec.model == model]
+    healthy = [d for d in matches if d.status == DeployState.HEALTHY and d.endpoint]
+    if healthy:
+        return "deploy", healthy[0]
+    if matches:
+        raise HTTPException(
+            status_code=422,
+            detail=f"'{model}' is deployed but not ready ({matches[0].status})",
+        )
+
+    known = sorted({d.spec.model for d in store.list(user.id)
+                    if d.status == DeployState.HEALTHY})
+    raise HTTPException(
+        status_code=404,
+        detail=f"no model or pool called '{model}'"
+               + (f" — you have: {', '.join(known)}" if known else
+                  " — deploy a model first"),
+    )
+
+
 def _resolve_pool(user: object, model: str) -> Pool:
     if model == "router":
         pools = store.list_pools(user.id)
@@ -801,6 +899,38 @@ SESSION_TTL_SECONDS = 3600
 SESSION_ID_MAX = 128
 
 
+async def _chat_with_deploy(deploy, req: RouterChatRequest):
+    """Serve one deployment directly, in OpenAI shape.
+
+    The caller authenticated with their account key; the deployment's own key
+    is internal and added here.
+    """
+    if deploy.status != DeployState.HEALTHY or not deploy.endpoint:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{deploy.spec.model} is not ready ({deploy.status})")
+    payload: dict = {
+        "model": deploy.spec.model,
+        "messages": req.messages,
+        "max_tokens": req.max_tokens,
+        "stream": req.stream,
+    }
+    if req.temperature is not None:
+        payload["temperature"] = req.temperature
+    if req.stream:
+        return StreamingResponse(
+            agent_client.chat_stream(deploy.endpoint, payload,
+                                     api_key=deploy.spec.api_key),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    try:
+        return await asyncio.to_thread(
+            agent_client.chat, deploy.endpoint, payload, 180.0, deploy.spec.api_key)
+    except agent_client.AgentError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
 def _session_expired(session: RouterSession) -> bool:
     try:
         from datetime import datetime
@@ -816,7 +946,7 @@ def _session_expired(session: RouterSession) -> bool:
 
 
 @app.post("/v1/chat/completions")
-async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
+async def openai_chat(req: RouterChatRequest, user=Depends(_api_user)):
     """OpenAI-compatible router endpoint. model="router" uses the user's
     default pool; model="<pool_id>" targets a specific pool.
 
@@ -827,7 +957,12 @@ async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
         raise HTTPException(status_code=422, detail="messages required")
     if req.session_id is not None and len(req.session_id) > SESSION_ID_MAX:
         raise HTTPException(status_code=422, detail="session_id too long")
-    pool = _resolve_pool(user, req.model)
+
+    kind, target = _resolve_target(user, req.model)
+    if kind == "deploy":
+        return await _chat_with_deploy(target, req)
+
+    pool = target
     session_id = req.session_id or uuid.uuid4().hex
     session = store.get_router_session(session_id)
     if session is None or session.pool_id != pool.id or session.user_id != user.id:
@@ -878,9 +1013,20 @@ async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
 
 
 @app.get("/v1/models")
-async def router_models(user=Depends(_current_user)):
-    pools = store.list_pools(user.id)
+async def openai_models(user=Depends(_api_user)):
+    """Everything this account can address by name: the deployments, the
+    pools, and the router."""
     data = []
+    for d in store.list(user.id):
+        if d.status == DeployState.HEALTHY and d.endpoint:
+            data.append({
+                "id": d.spec.model,
+                "object": "model",
+                "owned_by": "sursumai",
+                "deploy_id": d.id,
+                "runtime": d.spec.runtime,
+            })
+    pools = store.list_pools(user.id)
     for p in pools:
         members = []
         for deploy_id in (store.get_pool_models(p.id) or [p.weak_id, p.strong_id]):
@@ -888,13 +1034,14 @@ async def router_models(user=Depends(_current_user)):
             if deploy is not None:
                 members.append({"deploy_id": deploy.id, "model": deploy.spec.model})
         data.append({
-            "id": p.id,
+            "id": p.name,
             "object": "model",
             "owned_by": "sursumai",
-            "pool": p.to_dict(),
+            "pool_id": p.id,
+            "mode": p.mode,
             "models": members,
         })
-    if data:
-        data.insert(0, {"id": "router", "object": "model", "owned_by": "sursumai",
-                        "pool": pools[0].to_dict()})
+    if pools:
+        data.append({"id": "router", "object": "model", "owned_by": "sursumai",
+                     "pool_id": pools[0].id})
     return {"object": "list", "data": data}

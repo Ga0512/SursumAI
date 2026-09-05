@@ -164,12 +164,13 @@ def test_a_pool_cannot_be_built_from_another_users_deploys(client):
 
 # ---- deploys ----
 
-def test_a_new_deploy_gets_a_port_and_an_api_key(client):
+def test_a_new_deploy_gets_a_port_and_an_internal_key(client):
     token = _register(client)
     body = client.post("/deploys", json={"model": "org/m", "runtime": "llama"},
                        headers=_auth(token)).json()
     assert 9000 <= body["spec"]["port"] <= 9099
-    assert body["spec"]["api_key"].startswith("sk-sursum-")
+    # internal: it locks the model port, the user holds an account key instead
+    assert body["spec"]["api_key"].startswith("sk-internal-")
 
 
 def test_deploys_never_share_a_port(client):
@@ -332,14 +333,193 @@ def test_an_oversized_session_id_is_refused(client):
     assert resp.status_code == 422
 
 
-def test_models_lists_the_pool_members(client):
+def test_models_lists_deployments_pools_and_the_router(client):
     token = _register(client)
     ids = [_make_deploy(client, token, model=f"org/m{i}") for i in range(3)]
     client.post("/pools", json={"name": "p", "model_ids": ids}, headers=_auth(token))
     data = client.get("/v1/models", headers=_auth(token)).json()["data"]
-    pool_entry = next(d for d in data if d["id"] != "router")
+    listed = [d["id"] for d in data]
+    # addressable by model name, like any OpenAI client expects
+    assert {"org/m0", "org/m1", "org/m2"} <= set(listed)
+    assert "p" in listed and "router" in listed
+    pool_entry = next(d for d in data if d["id"] == "p")
     assert [m["model"] for m in pool_entry["models"]] == ["org/m0", "org/m1", "org/m2"]
 
 
 def test_health_needs_no_token(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+# ---- account API keys ----
+
+def _api_key(client, token, name="test key"):
+    resp = client.post("/api-keys", json={"name": name}, headers=_auth(token))
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_a_key_belongs_to_the_account_not_to_a_model(client):
+    """One key, every deployment — the way OpenAI and Anthropic work."""
+    token = _register(client)
+    for i in range(3):
+        _make_deploy(client, token, model=f"org/m{i}")
+    key = _api_key(client, token)["key"]
+    listed = client.get("/v1/models", headers=_auth(key)).json()["data"]
+    assert {"org/m0", "org/m1", "org/m2"} <= {d["id"] for d in listed}
+
+
+def test_you_can_hold_several_keys(client):
+    token = _register(client)
+    first, second = _api_key(client, token, "laptop"), _api_key(client, token, "ci")
+    assert first["key"] != second["key"]
+    assert {k["name"] for k in client.get("/api-keys", headers=_auth(token)).json()} == {
+        "laptop", "ci"}
+
+
+def test_the_plaintext_key_is_returned_once_and_never_stored(client):
+    token = _register(client)
+    key = _api_key(client, token)["key"]
+    listed = client.get("/api-keys", headers=_auth(token)).json()
+    assert all("key" not in k for k in listed)
+    rows = client.store._conn.execute("SELECT key_hash, display FROM api_keys").fetchall()
+    assert all(r["key_hash"] != key for r in rows)
+    assert all(key not in r["display"] for r in rows)
+
+
+def test_a_listed_key_is_recognisable_without_being_readable(client):
+    token = _register(client)
+    key = _api_key(client, token)["key"]
+    shown = client.get("/api-keys", headers=_auth(token)).json()[0]["display"]
+    assert shown.startswith("sk-sursum-") and shown.endswith(key[-4:])
+    assert shown != key
+
+
+def test_a_revoked_key_stops_working(client):
+    token = _register(client)
+    created = _api_key(client, token)
+    key = created["key"]
+    assert client.get("/v1/models", headers=_auth(key)).status_code == 200
+    assert client.delete(f"/api-keys/{created['id']}",
+                         headers=_auth(token)).status_code == 200
+    assert client.get("/v1/models", headers=_auth(key)).status_code == 401
+
+
+def test_a_revoked_key_disappears_from_the_list(client):
+    token = _register(client)
+    created = _api_key(client, token)
+    client.delete(f"/api-keys/{created['id']}", headers=_auth(token))
+    assert client.get("/api-keys", headers=_auth(token)).json() == []
+
+
+def test_a_made_up_key_is_rejected(client):
+    _register(client)
+    assert client.get("/v1/models",
+                      headers=_auth("sk-sursum-nonsense")).status_code == 401
+
+
+def test_another_users_key_cannot_be_revoked(client):
+    alice, bob = _register(client, "alice@x.com"), _register(client, "bob@x.com")
+    created = _api_key(client, alice)
+    assert client.delete(f"/api-keys/{created['id']}",
+                         headers=_auth(bob)).status_code == 404
+
+
+def test_a_key_sees_only_its_own_account(client):
+    alice, bob = _register(client, "alice@x.com"), _register(client, "bob@x.com")
+    _make_deploy(client, alice, model="alice/model")
+    bob_key = _api_key(client, bob)["key"]
+    listed = client.get("/v1/models", headers=_auth(bob_key)).json()["data"]
+    assert "alice/model" not in {d["id"] for d in listed}
+
+
+# ---- what a key may do ----
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/deploys"),
+    ("POST", "/deploys"),
+    ("DELETE", "/deploys/x"),
+    ("GET", "/api-keys"),
+    ("POST", "/api-keys"),
+    ("POST", "/pools"),
+])
+def test_an_api_key_cannot_manage_the_account(client, method, path):
+    """A key that leaks out of an inference script must not be able to destroy
+    deployments or mint more keys."""
+    token = _register(client)
+    key = _api_key(client, token)["key"]
+    assert client.request(method, path, json={}, headers=_auth(key)).status_code == 403
+
+
+def test_a_session_still_works_for_inference(client):
+    """The browser has no API key; it uses the session it already has."""
+    token = _register(client)
+    _make_deploy(client, token, model="org/m")
+    assert client.get("/v1/models", headers=_auth(token)).status_code == 200
+
+
+# ---- addressing a model by name ----
+
+def test_a_deployment_is_addressable_by_its_model_name(client, monkeypatch):
+    token = _register(client)
+    _make_deploy(client, token, model="Qwen/Qwen3-0.6B-GGUF")
+    key = _api_key(client, token)["key"]
+
+    seen = {}
+
+    def _chat(endpoint, payload, timeout=180.0, api_key=None):
+        seen.update(endpoint=endpoint, api_key=api_key, model=payload["model"])
+        return {"choices": [{"message": {"role": "assistant", "content": "hi"}}],
+                "usage": {"total_tokens": 2}}
+
+    monkeypatch.setattr(central_app.agent_client, "chat", _chat)
+    body = client.post("/v1/chat/completions",
+                       json={"model": "Qwen/Qwen3-0.6B-GGUF",
+                             "messages": [{"role": "user", "content": "hi"}]},
+                       headers=_auth(key)).json()
+    assert body["choices"][0]["message"]["content"] == "hi"
+    assert seen["model"] == "Qwen/Qwen3-0.6B-GGUF"
+    # the deployment's own key is internal and added by the central
+    assert seen["api_key"].startswith("sk-internal-")
+
+
+def test_an_unknown_model_says_what_is_available(client):
+    token = _register(client)
+    _make_deploy(client, token, model="org/real")
+    key = _api_key(client, token)["key"]
+    resp = client.post("/v1/chat/completions",
+                       json={"model": "org/nope",
+                             "messages": [{"role": "user", "content": "hi"}]},
+                       headers=_auth(key))
+    assert resp.status_code == 404
+    assert "org/real" in resp.json()["detail"]
+
+
+def test_a_model_that_is_not_ready_says_so(client):
+    token = _register(client)
+    _make_deploy(client, token, model="org/slow", healthy=False)
+    key = _api_key(client, token)["key"]
+    resp = client.post("/v1/chat/completions",
+                       json={"model": "org/slow",
+                             "messages": [{"role": "user", "content": "hi"}]},
+                       headers=_auth(key))
+    assert resp.status_code == 422
+    assert "not ready" in resp.json()["detail"]
+
+
+def test_a_pool_is_addressable_by_its_name(client, monkeypatch):
+    token = _register(client)
+    ids = [_make_deploy(client, token, model=f"org/m{i}") for i in range(2)]
+    client.post("/pools", json={"name": "meu-pool", "model_ids": ids},
+                headers=_auth(token))
+    key = _api_key(client, token)["key"]
+
+    monkeypatch.setattr(central_app.router_mod, "route_turn",
+                        lambda *a, **kw: {"served": ids[0], "served_model": "org/m0",
+                                          "served_endpoint": "", "decision": "weak_ok",
+                                          "content": "pooled", "reasoning": "",
+                                          "usage": {"total_tokens": 1}, "latched": False})
+    body = client.post("/v1/chat/completions",
+                       json={"model": "meu-pool",
+                             "messages": [{"role": "user", "content": "hi"}]},
+                       headers=_auth(key)).json()
+    assert body["choices"][0]["message"]["content"] == "pooled"

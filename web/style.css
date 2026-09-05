@@ -612,9 +612,33 @@ body {
 .kv-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .kv-row .url { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .kv-label { color: #7d879c; font-size: 0.78rem; flex-shrink: 0; }
-/* the key is monospace so the masked and revealed forms do not jump around */
-#detailKey { font-variant-ligatures: none; letter-spacing: 0.02em; }
 .btn-sm { padding: 4px 10px; font-size: 0.75rem; flex-shrink: 0; }
+
+/* --- account API keys --- */
+.keys-intro { margin-bottom: 18px; color: #7d879c; font-size: 0.85rem; }
+.keys-intro p { margin: 0 0 10px; max-width: 60ch; }
+.keys-base { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.keys-new { display: flex; gap: 10px; margin-bottom: 16px; }
+.keys-new .input { flex: 1; }
+.keys-empty { color: #7d879c; font-size: 0.85rem; padding: 20px 0; }
+.keys-list { display: flex; flex-direction: column; gap: 8px; }
+.key-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 14px; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+}
+.key-main { flex: 1; min-width: 200px; }
+.key-name { font-weight: 600; margin-bottom: 2px; }
+.key-display { color: #7d879c; font-size: 0.8rem; }
+.key-meta { display: flex; flex-direction: column; gap: 2px; color: #7d879c; font-size: 0.74rem; }
+
+/* shown once, right after minting — it never comes back */
+.key-reveal {
+  border: 1px solid var(--blue); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 16px;
+}
+.key-reveal-head { font-size: 0.8rem; margin-bottom: 8px; }
+.key-reveal-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.key-reveal-row code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.82rem; }
 
 /* --- playground --- */
 .play-area { display: flex; flex-direction: column; gap: 12px; }

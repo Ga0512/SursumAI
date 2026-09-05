@@ -47,9 +47,26 @@ def test_token_hash_is_stable_and_not_the_token():
     assert token not in auth.hash_token(token)
 
 
-def test_deploy_keys_are_recognisable_and_unique():
+def test_deploy_keys_are_internal_and_unique():
+    """The per-deploy key locks the model port; it is never shown to anyone,
+    and its prefix says so."""
     a, b = auth.new_deploy_key(), auth.new_deploy_key()
+    assert a.startswith("sk-internal-") and a != b
+    assert not auth.looks_like_api_key(a)
+
+
+def test_account_api_keys_are_recognisable_and_unique():
+    a, b = auth.new_api_key(), auth.new_api_key()
     assert a.startswith("sk-sursum-") and a != b
+    assert auth.looks_like_api_key(a)
+    assert len(a) > 40
+
+
+def test_the_display_form_hides_the_middle():
+    key = auth.new_api_key()
+    shown = auth.key_display(key)
+    assert shown.startswith("sk-sursum-") and shown.endswith(key[-4:])
+    assert key[14:-4] not in shown
 
 
 def test_session_expiry_is_in_the_future():

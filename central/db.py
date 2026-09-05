@@ -234,6 +234,23 @@ class Store:
         )
         self._conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                key_hash TEXT UNIQUE NOT NULL,
+                display TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)"
+        )
+        self._conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS metrics (
                 deploy_id TEXT NOT NULL,
                 ts REAL NOT NULL,
@@ -380,6 +397,62 @@ class Store:
     def purge_expired_sessions(self) -> None:
         self._conn.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
         self._conn.commit()
+
+    # ---- api keys ----
+
+    def create_api_key(self, user_id: str, name: str) -> tuple[dict, str]:
+        """Mint a key. Returns (row, plaintext) — the plaintext is returned
+        exactly once and never stored, only its hash."""
+        key = auth.new_api_key()
+        row = {
+            "id": uuid.uuid4().hex,
+            "user_id": user_id,
+            "name": name,
+            "display": auth.key_display(key),
+            "created_at": _now(),
+            "last_used_at": None,
+            "revoked_at": None,
+        }
+        self._conn.execute(
+            "INSERT INTO api_keys (id, user_id, name, key_hash, display, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (row["id"], user_id, name, auth.hash_token(key), row["display"],
+             row["created_at"]),
+        )
+        self._conn.commit()
+        return row, key
+
+    def list_api_keys(self, user_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT id, user_id, name, display, created_at, last_used_at, revoked_at "
+            "FROM api_keys WHERE user_id = ? AND revoked_at IS NULL "
+            "ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_user_by_api_key(self, key: str) -> User | None:
+        row = self._conn.execute(
+            "SELECT * FROM api_keys WHERE key_hash = ? AND revoked_at IS NULL",
+            (auth.hash_token(key),),
+        ).fetchone()
+        if not row:
+            return None
+        self._conn.execute(
+            "UPDATE api_keys SET last_used_at = ? WHERE id = ?", (_now(), row["id"])
+        )
+        self._conn.commit()
+        return self.get_user_by_id(row["user_id"])
+
+    def revoke_api_key(self, key_id: str, user_id: str) -> bool:
+        """Revoked, not deleted: the row is the record that the key existed."""
+        cur = self._conn.execute(
+            "UPDATE api_keys SET revoked_at = ? WHERE id = ? AND user_id = ? "
+            "AND revoked_at IS NULL",
+            (_now(), key_id, user_id),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
 
     # ---- deploys ----
 

@@ -45,7 +45,7 @@ use.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.7.1/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.0/install.sh | bash
 ```
 
 The installer downloads a **released tag** (never a moving branch) and checks
@@ -139,6 +139,27 @@ CUDA build of llama-server on your GPU (no Vulkan, no Docker required).
 | **Mistral** | Mistral Small/Medium/Large | Mistral Small 24B |
 | **Bonsai** | — | Bonsai 8B, 4B, 1.7B, 27B (1-bit) |
 
+## Using it from your code
+
+One base URL, one key, and the model name — any OpenAI-compatible client works
+unchanged:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8001/v1", api_key="sk-sursum-...")
+
+resp = client.chat.completions.create(
+    model="Qwen/Qwen3-0.6B-GGUF",     # or a pool name, or "router"
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Create the key under **API keys** in the web UI, or with
+`sursumai keys --create "my laptop"`. `GET /v1/models` lists everything you can
+address by name: your deployments, your pools, and `router`.
+
 ## CLI
 
 Everything you can do in the web UI, you can do from a terminal:
@@ -148,8 +169,9 @@ sursumai login <email>                  # store your token (prompts for password
 sursumai whoami                         # who am I logged in as?
 sursumai list                           # table of deployments
 sursumai pools                          # table of pools
+sursumai keys                           # list account API keys
 sursumai deploy <org/model>             # GGUF names auto-detect llama-server
-sursumai key <id>                       # print the deployment's API key
+sursumai keys --create "my laptop"      # mint an account API key
 sursumai chat <id> "hello"              # one message to a deployment…
 sursumai chat router "hello"            # …or to the router
 sursumai logs <id> --follow             # tail a deployment's log live
@@ -194,9 +216,14 @@ SursumAI is a local app and is set up to stay that way.
   `~/.sursumai/agent.key` (readable only by you) and shared by the central and
   the agent. If you bind to the network while still using the built-in
   development key, the agent refuses to start.
-- **One API key per deployment.** Each model server is started with its own
-  `--api-key`, so a deployment is not open to anything that finds the port. The
-  key is in the **Details → Code** snippets, and in `sursumai key <id>`.
+- **Account API keys.** One key works for every model and pool you own — the
+  same shape as an OpenAI or Anthropic key. Create as many as you like (one per
+  machine or project), revoke any of them, and they are stored hashed: the
+  plaintext is shown once, when you create it. A key can call `/v1` only, never
+  create or destroy deployments.
+- **Each model server is locked too.** Deployments are started with an internal
+  key of their own, so nothing else on the machine can reach the model port
+  directly. You never see or handle it.
 - **Session tokens are stored hashed.** A copy of the database hands out no
   working logins. (Upgrading from an older version logs everyone out once.)
 
