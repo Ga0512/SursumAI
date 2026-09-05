@@ -49,8 +49,19 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
   fail "tag $TAG already exists — bump VERSION for a new release"
 fi
 
-python3 -m pytest -q || fail "tests failed — not releasing"
-ok "tests pass"
+# pytest may live in the venv or in the system python, depending on how the
+# machine was set up; say so plainly instead of failing on a missing module
+PYTEST=""
+for candidate in ".venv/bin/python" "python3" "python"; do
+  if "$candidate" -m pytest --version >/dev/null 2>&1; then
+    PYTEST="$candidate"
+    break
+  fi
+done
+[ -n "$PYTEST" ] || fail "pytest not found — run: pip install -r requirements-dev.txt"
+
+"$PYTEST" -m pytest -q || fail "tests failed — not releasing"
+ok "tests pass ($PYTEST)"
 
 for script in install.sh setup.sh start.sh release.sh; do
   bash -n "$script" || fail "$script does not parse"
