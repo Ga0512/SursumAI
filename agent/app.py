@@ -109,16 +109,28 @@ def _auth_enforced(endpoint: str, api_key: str | None) -> bool:
     """Is the deploy actually refusing unauthenticated callers?
 
     Asking the server instead of trusting the flag: if a runtime ever ignores
-    --api-key-file, it starts wide open and the authenticated probe still
-    passes, so the endpoint would look healthy while being unprotected. A
-    security control that silently fails to apply is worse than none.
+    its key, it starts wide open and the authenticated probe still passes, so
+    the endpoint would look healthy while being unprotected. A security
+    control that silently fails to apply is worse than none.
+
+    Probes /chat/completions, not /models: llama.cpp deliberately leaves the
+    model list public, so a 200 there proves nothing. An empty body is enough
+    — auth is checked before the request is validated, so an enforcing server
+    answers 401 without running any inference.
     """
     if not api_key:
         return True  # nothing to enforce
-    status = _probe(endpoint, api_key=None)
-    if status is None:
+    req = urllib.request.Request(
+        f"{endpoint}/chat/completions", data=b"{}", method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+            return False  # answered an unauthenticated caller
+    except urllib.error.HTTPError as e:
+        return e.code in (401, 403)
+    except (urllib.error.URLError, OSError):
         return True  # unreachable: the health probe reports that separately
-    return status in (401, 403)
 
 
 @app.get("/health")
@@ -249,7 +261,9 @@ def _port_check(spec: Spec) -> dict:
         return {"name": "port", "ok": False,
                 "detail": f"port {port} is outside the deploy range "
                           f"{ports.PORT_MIN}-{ports.PORT_MAX}"}
-    if ports.is_free(port):
+    # waits a few seconds: a deploy created right after destroying another one
+    # would otherwise be refused a port that is still being released
+    if ports.wait_until_free(port):
         return {"name": "port", "ok": True, "detail": f"port {port} is free"}
     return {
         "name": "port", "ok": False,

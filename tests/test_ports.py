@@ -162,3 +162,42 @@ def test_the_executors_fall_back_to_the_legacy_port_without_a_spec():
     from agent import executor_llama
 
     assert executor_llama.deploy_port("abc") == ports.legacy_port("abc")
+
+
+# ---- releasing a port takes a moment ----
+
+def test_wait_until_free_returns_at_once_for_a_free_port():
+    import time as _time
+
+    start = _time.monotonic()
+    assert ports.wait_until_free(ports.PORT_MIN, timeout=5) is True
+    assert _time.monotonic() - start < 1
+
+
+def test_wait_until_free_gives_up_on_a_port_that_stays_busy():
+    import time as _time
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        busy = srv.getsockname()[1]
+        start = _time.monotonic()
+        assert ports.wait_until_free(busy, timeout=1.5) is False
+        assert _time.monotonic() - start >= 1.5
+
+
+def test_wait_until_free_notices_a_port_being_released():
+    """The real case: a container is still tearing down when the next deploy
+    asks for its port."""
+    import threading
+    import time as _time
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    busy = srv.getsockname()[1]
+    threading.Timer(1.0, srv.close).start()
+
+    start = _time.monotonic()
+    assert ports.wait_until_free(busy, timeout=8) is True
+    assert _time.monotonic() - start >= 0.5

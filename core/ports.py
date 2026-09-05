@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import socket
+import time
 
 PORT_MIN = 9000
 PORT_MAX = 9099
@@ -48,6 +49,23 @@ def is_free(port: int, host: str = "127.0.0.1") -> bool:
             return True
         except OSError:
             return False
+
+
+def wait_until_free(port: int, timeout: float = 8.0, host: str = "127.0.0.1") -> bool:
+    """Wait briefly for a port to come free.
+
+    Tearing a container down and releasing its port is not instant, so a
+    deploy created right after destroying another one would otherwise be
+    rejected for a port that is about to be free. Only worth a few seconds:
+    anything longer really is someone else's port.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if is_free(port, host):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 def first_free(taken: set[int]) -> int:

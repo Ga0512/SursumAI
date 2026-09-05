@@ -204,21 +204,45 @@ def test_llama_reads_its_key_from_a_file_not_from_argv():
 
 def test_the_agent_reports_whether_auth_is_really_enforced(client, monkeypatch):
     """Trusting the flag is not enough: a runtime that ignored its key file
-    would still answer the authenticated probe, and look perfectly healthy."""
+    would still answer the authenticated probe, and look perfectly healthy.
+
+    Probed on /chat/completions rather than /models, because llama.cpp keeps
+    the model list public on purpose — a 200 there proves nothing."""
     monkeypatch.setattr(agent_app.executor, "is_running", lambda did: True)
     monkeypatch.setattr(agent_app.executor_llama, "is_running", lambda did: False)
     monkeypatch.setattr(agent_app.executor, "stage", lambda did: "running")
     monkeypatch.setattr(agent_app, "_probe_healthy", lambda ep, key=None: True)
     agent_app.SPECS[DEPLOY_ID] = Spec.from_dict(SPEC)
 
+    import urllib.error
+
+    def _answers(status):
+        """Fake the model endpoint answering an unauthenticated POST."""
+        class _Resp:
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def _urlopen(req, timeout=None):
+            if status < 400:
+                return _Resp()
+            raise urllib.error.HTTPError(req.full_url, status, "", None, None)
+
+        return _urlopen
+
     # the endpoint answers an unauthenticated caller: the key is not applied
-    monkeypatch.setattr(agent_app, "_probe", lambda ep, api_key=None: 200)
+    monkeypatch.setattr(agent_app.urllib.request, "urlopen", _answers(200))
     body = client.get(f"/deploys/{DEPLOY_ID}/status",
                       headers={"X-Agent-Key": "test-agent-key"}).json()
     assert body["auth_enforced"] is False
 
     # the endpoint refuses it: the key is doing its job
-    monkeypatch.setattr(agent_app, "_probe", lambda ep, api_key=None: 401)
+    monkeypatch.setattr(agent_app.urllib.request, "urlopen", _answers(401))
     body = client.get(f"/deploys/{DEPLOY_ID}/status",
                       headers={"X-Agent-Key": "test-agent-key"}).json()
     assert body["auth_enforced"] is True
