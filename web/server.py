@@ -4,6 +4,7 @@ import argparse
 import functools
 import http.server
 import os
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -98,12 +99,29 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "only /api/* is accepted on DELETE")
 
 
+def _utf8_output() -> None:
+    """Never die printing a status line.
+
+    stdout is redirected to a log file by start.sh, so its encoding comes from
+    the locale — under LANG=C (or a Windows console) an arrow or a check mark
+    raises UnicodeEncodeError and takes the whole process down at boot.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):  # not a reconfigurable stream
+            pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="SursumAI web static server + /api proxy")
     parser.add_argument("--port", type=int, default=3000)
-    parser.add_argument("--host", default="0.0.0.0")
+    # loopback by default: the UI is for this machine. Exposing it on the
+    # network is opt-in via SURSUMAI_BIND (or an explicit --host).
+    parser.add_argument("--host", default=os.environ.get("SURSUMAI_BIND", "127.0.0.1"))
     args = parser.parse_args()
 
+    _utf8_output()
     os.chdir(WEB_DIR)
     handler = functools.partial(ProxyHandler, directory=str(WEB_DIR))
     with http.server.ThreadingHTTPServer((args.host, args.port), handler) as httpd:

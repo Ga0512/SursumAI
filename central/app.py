@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import urllib.request
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -15,14 +17,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from core import metrics
+from core import ports
 from core.spec import Spec, SpecError
 from . import agent_client
 from . import auth as authmod
 from . import router as router_mod
 from .db import DeployState, Pool, RouterSession, Store
 
-app = FastAPI(title="SursumAI Central")
+log = logging.getLogger("sursumai.central")
+
 store = Store()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    store.purge_expired_sessions()
+    await asyncio.to_thread(_reconcile_stale)
+    tasks = [asyncio.create_task(_metrics_loop()),
+             asyncio.create_task(_reconcile_loop())]
+    try:
+        yield
+    finally:
+        # stop the background loops with the app, so a reload does not leave
+        # two of each running against the same database
+        for task in tasks:
+            task.cancel()
+
+
+app = FastAPI(title="SursumAI Central", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,7 +162,8 @@ async def _run_preflight(spec: Spec) -> list[dict] | None:
     try:
         result = await asyncio.to_thread(agent_client.preflight, spec.to_dict())
         return result.get("checks")
-    except agent_client.AgentError:
+    except agent_client.AgentError as e:
+        log.warning("preflight could not reach the agent: %s", e)
         return None
 
 
@@ -221,8 +244,11 @@ async def _metrics_loop() -> None:
             try:
                 snap = await asyncio.to_thread(agent_client.metrics, d.id)
                 store.save_metrics(d.id, snap)
-            except (agent_client.AgentError, Exception):
-                pass
+            except agent_client.AgentError as e:
+                # expected while a model is still warming up or already gone
+                log.debug("metrics unavailable for %s: %s", d.id, e)
+            except Exception:
+                log.exception("unexpected error scraping metrics for %s", d.id)
 
 
 def _reconcile_stale(statuses: set[str] | None = None) -> None:
@@ -248,14 +274,7 @@ async def _reconcile_loop() -> None:
         try:
             await asyncio.to_thread(_reconcile_stale, {DeployState.HEALTHY})
         except Exception:
-            pass
-
-
-@app.on_event("startup")
-async def _startup() -> None:
-    await asyncio.to_thread(_reconcile_stale)
-    asyncio.create_task(_metrics_loop())
-    asyncio.create_task(_reconcile_loop())
+            log.exception("reconcile pass failed")
 
 
 @app.get("/health")
@@ -292,11 +311,18 @@ def _local_version() -> str:
         return "?"
 
 
+LATEST_RELEASE_API = "https://api.github.com/repos/Ga0512/SursumAI/releases/latest"
+
+
 def _latest_version() -> str:
+    """The newest published release tag (v1.2.3 -> 1.2.3). Releases, not the
+    branch tip: the installer only ever installs a tag."""
     try:
-        with urllib.request.urlopen(f"{REPO_BASE}/raw/main/VERSION", timeout=15) as resp:
-            return resp.read().decode().strip() or "?"
-    except Exception:
+        with urllib.request.urlopen(LATEST_RELEASE_API, timeout=15) as resp:
+            tag = (json.load(resp).get("tag_name") or "").strip()
+            return tag.lstrip("v") or "?"
+    except Exception as e:
+        log.info("could not check for updates: %s", e)
         return "?"
 
 
@@ -318,15 +344,22 @@ async def meta_update_apply():
     The installer ends by starting SursumAI, so the services come back up
     on the new version automatically."""
     import subprocess as sp
+    latest = await asyncio.to_thread(_latest_version)
+    if latest == "?":
+        raise HTTPException(status_code=502, detail="could not find a published release to update to")
+    tag = f"v{latest}"
+    # fetch the installer from the tag being installed, never from the branch
+    script = f"{REPO_BASE}/raw/{tag}/install.sh"
     try:
         sp.Popen(
-            ["bash", "-c", f"curl -fsSL {REPO_BASE}/raw/main/install.sh | bash"],
+            ["bash", "-c", f"curl -fsSL {script} | SURSUMAI_VERSION={tag} bash"],
             stdout=sp.DEVNULL, stderr=sp.DEVNULL,
             start_new_session=True,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"update failed to start: {e}") from e
-    return {"status": "started", "note": "SursumAI will restart after the update"}
+    return {"status": "started", "version": latest,
+            "note": "SursumAI will restart after the update"}
 
 
 # ---- auth ----
@@ -378,7 +411,15 @@ async def create_deploy(req: DeployRequest, user=Depends(_current_user)):
         spec = _spec_from_request(req)
     except SpecError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    deploy = store.create(spec, user.id)
+    # every deploy gets its own bearer key; the runtime is started with
+    # --api-key so the model endpoint is not open to whoever finds the port
+    spec.api_key = authmod.new_deploy_key()
+    try:
+        # store.create allocates the port under a lock; the UNIQUE index is
+        # the last word, so two simultaneous creates cannot share one
+        deploy = store.create(spec, user.id)
+    except ports.NoPortAvailable as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
     asyncio.create_task(_deploy_job(deploy.id))
     return deploy.to_dict()
 
@@ -421,6 +462,16 @@ async def redeploy(deploy_id: str, req: RedeployRequest, user=Depends(_current_u
         spec = _spec_from_request(req, base=deploy.spec)
     except SpecError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    spec.api_key = deploy.spec.api_key or authmod.new_deploy_key()
+    # keep the port across a redeploy (the endpoint URL must not move); a
+    # legacy deploy without one gets a real port now
+    if ports.in_range(deploy.spec.port):
+        spec.port = deploy.spec.port
+    else:
+        try:
+            spec.port = store.allocate_port(exclude_id=deploy.id)
+        except ports.NoPortAvailable as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
     deploy.spec = spec
     deploy.status = DeployState.REDEPLOYING
     deploy.error = None
@@ -457,12 +508,15 @@ async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_curre
         payload["temperature"] = req.temperature
     if req.stream:
         return StreamingResponse(
-            agent_client.chat_stream(deploy.endpoint, payload),
+            agent_client.chat_stream(deploy.endpoint, payload,
+                                     api_key=deploy.spec.api_key),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     try:
-        result = await asyncio.to_thread(agent_client.chat, deploy.endpoint, payload)
+        result = await asyncio.to_thread(
+            agent_client.chat, deploy.endpoint, payload, 180.0, deploy.spec.api_key,
+        )
     except agent_client.AgentError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return result
@@ -610,9 +664,85 @@ def _openai_chunk(created: int, model: str, content: str | None = None,
     return chunk
 
 
+def _served_label(pool: Pool, model: str, decision: str) -> str:
+    """What the client sees in `model`: the pool, the model that actually
+    answered, and why it was picked."""
+    return f"{pool.name} → {model} ({decision})"
+
+
+CHUNK_SIZE = 80
+
+
+def _replay_chunks(text: str, created: int, label: str, reasoning: bool = False):
+    """Emit an already-generated answer as SSE deltas. Each chunk is the next
+    slice of the text — never a growing prefix, which would make the client
+    render the answer over and over."""
+    for i in range(0, len(text), CHUNK_SIZE):
+        piece = text[i:i + CHUNK_SIZE]
+        chunk = (_openai_chunk(created, label, reasoning=piece) if reasoning
+                 else _openai_chunk(created, label, piece))
+        yield f"data: {json.dumps(chunk)}\n\n"
+
+
+def _relabel_upstream(raw: bytes, label: str, session_id: str) -> bytes | None:
+    """Rewrite `model` on a chunk coming straight from the chosen deploy so
+    the client always sees which model answered. Returns None for [DONE],
+    which the caller emits itself after the trailer."""
+    line = raw.decode("utf-8", errors="replace")
+    if not line.strip():
+        return b"\n"
+    if not line.startswith("data: "):
+        return raw
+    body = line[6:].strip()
+    if body == "[DONE]":
+        return None
+    try:
+        obj = json.loads(body)
+    except ValueError:
+        return raw
+    obj["model"] = label
+    obj["session_id"] = session_id
+    return f"data: {json.dumps(obj)}\n\n".encode()
+
+
 def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
                         user_id: str, messages: list[dict], created: int,
                         max_tokens: int, temperature: float | None):
+    """Stream a routed answer.
+
+    When the mode can decide who answers before generating (stage,
+    round_robin, classifier, or a latched session), tokens are forwarded live
+    from the chosen deploy. The escalation/advisor modes have to read a first
+    reply before they can route, so their answer is already complete by the
+    time we get here and is replayed in chunks.
+    """
+    try:
+        target = router_mod.pick_target(store, pool, session, messages)
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        return
+
+    if target is not None:
+        deploy, decision = target
+        label = _served_label(pool, deploy.spec.model, decision)
+        payload: dict = {
+            "model": deploy.spec.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        for raw in agent_client.chat_stream(deploy.endpoint, payload,
+                                            api_key=deploy.spec.api_key):
+            out = _relabel_upstream(raw, label, session.id)
+            if out is None:
+                break
+            yield out
+        yield "data: [DONE]\n\n"
+        store.log_router(session.id, pool.id, user_id, deploy.id, decision, 0, 0)
+        return
+
     try:
         outcome = router_mod.route_turn(
             store, pool, session, user_id, messages, max_tokens, temperature,
@@ -620,25 +750,21 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         return
-    served_model = pool.name
-    if outcome["decision"] in ("weak_ok", "weak_bad", "weak", "advisor"):
-        served_model = f"{pool.name} (weak)"
-    elif outcome["decision"] in ("escalated", "strong"):
-        served_model = f"{pool.name} (strong)"
-    elif outcome["decision"] == "classifier":
-        served_model = f"{pool.name} (classifier)"
-    elif outcome["decision"] == "latched":
-        served_model = f"{pool.name} (strong, latched)"
-    content = outcome["content"]
+
+    label = _served_label(pool, outcome["served_model"], outcome["decision"])
     reasoning = outcome.get("reasoning") or ""
     if reasoning:
-        for piece in (reasoning[: i + 80] for i in range(0, len(reasoning), 80)):
-            yield f"data: {json.dumps(_openai_chunk(created, served_model, reasoning=piece))}\n\n"
-    for piece in (content[: i + 80] for i in range(0, len(content), 80)):
-        yield f"data: {json.dumps(_openai_chunk(created, served_model, piece))}\n\n"
-    final = _openai_chunk(created, served_model, finish="stop")
+        yield from _replay_chunks(reasoning, created, label, reasoning=True)
+    yield from _replay_chunks(outcome["content"], created, label)
+    final = _openai_chunk(created, label, finish="stop")
     final["usage"] = outcome["usage"]
     final["session_id"] = session.id
+    final["sursumai"] = {
+        "pool": pool.name,
+        "served_deploy": outcome["served"],
+        "served_model": outcome["served_model"],
+        "decision": outcome["decision"],
+    }
     final["choices"][0]["delta"] = {}
     yield f"data: {json.dumps(final)}\n\n"
     yield "data: [DONE]\n\n"
@@ -676,7 +802,8 @@ def _session_expired(session: RouterSession) -> bool:
             updated = updated.replace(tzinfo=timezone.utc)
         age = time.time() - updated.timestamp()
         return age > SESSION_TTL_SECONDS
-    except Exception:
+    except (ValueError, TypeError, OSError) as e:
+        log.warning("unreadable router session timestamp %r: %s", session.updated_at, e)
         return False
 
 
@@ -717,6 +844,7 @@ async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
             req.max_tokens, req.temperature,
         )
     except Exception as e:
+        log.exception("router turn failed for pool %s", pool.id)
         raise HTTPException(status_code=502, detail=str(e)) from e
     store.log_router(session.id, pool.id, user.id, outcome["served"],
                      outcome["decision"], outcome["usage"].get("total_tokens", 0), 0)
@@ -727,25 +855,38 @@ async def router_chat(req: RouterChatRequest, user=Depends(_current_user)):
         "id": f"chatcmpl-{uuid.uuid4().hex}",
         "object": "chat.completion",
         "created": created,
-        "model": f"{pool.name} ({outcome['decision']})",
+        "model": _served_label(pool, outcome["served_model"], outcome["decision"]),
         "choices": [{"index": 0, "message": message,
                      "finish_reason": "stop"}],
         "usage": outcome["usage"],
         "session_id": session.id,
+        "sursumai": {
+            "pool": pool.name,
+            "served_deploy": outcome["served"],
+            "served_model": outcome["served_model"],
+            "decision": outcome["decision"],
+        },
     }
 
 
 @app.get("/v1/models")
 async def router_models(user=Depends(_current_user)):
     pools = store.list_pools(user.id)
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": "router",
-                "object": "model",
-                "owned_by": "sursumai",
-                "pool": p.to_dict(),
-            } for p in pools
-        ],
-    }
+    data = []
+    for p in pools:
+        members = []
+        for deploy_id in (store.get_pool_models(p.id) or [p.weak_id, p.strong_id]):
+            deploy = store.get(deploy_id)
+            if deploy is not None:
+                members.append({"deploy_id": deploy.id, "model": deploy.spec.model})
+        data.append({
+            "id": p.id,
+            "object": "model",
+            "owned_by": "sursumai",
+            "pool": p.to_dict(),
+            "models": members,
+        })
+    if data:
+        data.insert(0, {"id": "router", "object": "model", "owned_by": "sursumai",
+                        "pool": pools[0].to_dict()})
+    return {"object": "list", "data": data}

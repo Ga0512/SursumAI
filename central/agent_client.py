@@ -5,8 +5,10 @@ import os
 import urllib.error
 import urllib.request
 
+from core import keys
+
 AGENT_URL = os.environ.get("AGENT_URL", "http://localhost:8010")
-AGENT_KEY = os.environ.get("AGENT_KEY", "dev-agent-key")
+AGENT_KEY = keys.load_or_create_agent_key()
 
 
 class AgentError(Exception):
@@ -61,12 +63,15 @@ def metrics(deploy_id: str) -> dict:
     return _request("GET", f"/deploys/{deploy_id}/metrics")
 
 
-def chat(endpoint: str, payload: dict, timeout: float = 180.0) -> dict:
+def chat(endpoint: str, payload: dict, timeout: float = 180.0,
+         api_key: str | None = None) -> dict:
     """POST a chat completion to a deploy's OpenAI-compatible endpoint."""
     url = endpoint.rstrip("/") + "/chat/completions"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
@@ -80,7 +85,8 @@ def chat(endpoint: str, payload: dict, timeout: float = 180.0) -> dict:
         raise AgentError(f"deploy unreachable at {endpoint}: {e}") from None
 
 
-def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0):
+def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0,
+                api_key: str | None = None):
     """Generator that forwards raw SSE bytes from a streaming chat completion.
 
     Runs inside the central's threadpool (StreamingResponse), so the blocking
@@ -90,6 +96,8 @@ def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             for line in resp:

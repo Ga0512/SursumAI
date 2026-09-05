@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import urllib.request
 from pathlib import Path
 
+from core import ports
 from core.spec import Spec
 
 IMAGE = "vllm/vllm-openai:v0.21.0"
-BASE_PORT = 9000
 LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 
 
@@ -18,10 +17,14 @@ class TransportError(Exception):
 
 
 def deploy_port(deploy_id: str, spec: Spec | None = None) -> int:
+    """The port this deploy listens on.
+
+    The central allocates it and puts it in the spec. The hash fallback is
+    only for deploys created before allocation existed — see core.ports.
+    """
     if spec is not None and spec.port:
         return spec.port
-    digest = int(hashlib.sha256(deploy_id.encode()).hexdigest()[:8], 16)
-    return BASE_PORT + (digest % 100)
+    return ports.legacy_port(deploy_id)
 
 
 def endpoint(deploy_id: str, spec: Spec | None = None) -> str:
@@ -57,6 +60,8 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--tensor-parallel-size", str(spec.gpus),
         "--enable-prefix-caching",
     ]
+    if spec.api_key:
+        cmd += ["--api-key", spec.api_key]
     return cmd
 
 

@@ -4,19 +4,55 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from core import keys
+from core import ports
 from core import metrics
 from core.spec import Spec, SpecError
 from . import executor, executor_llama
 
-app = FastAPI(title="SursumAI Agent")
+AGENT_KEY = keys.load_or_create_agent_key()
 
-AGENT_KEY = os.environ.get("AGENT_KEY", "dev-agent-key")
+
+def _bind_host() -> str:
+    """Where uvicorn was told to listen. Only used to decide whether this
+    process is reachable from outside the machine."""
+    for i, arg in enumerate(sys.argv):
+        if arg == "--host" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if arg.startswith("--host="):
+            return arg.split("=", 1)[1]
+    return os.environ.get("SURSUMAI_BIND", "127.0.0.1")
+
+
+def _check_key_exposure() -> None:
+    host = _bind_host()
+    if keys.is_dev_key(AGENT_KEY) and not keys.is_loopback(host):
+        raise RuntimeError(
+            f"refusing to start: the agent is listening on {host} (reachable from "
+            "the network) while still using the built-in development key. "
+            "Unset AGENT_KEY so a private key is generated in ~/.sursumai/agent.key, "
+            "or set AGENT_KEY to a secret of your own."
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _check_key_exposure()
+    yield
+
+
+app = FastAPI(title="SursumAI Agent", lifespan=lifespan)
 
 
 def _executor(runtime: str):
@@ -32,14 +68,31 @@ class PreflightRequest(BaseModel):
     spec: dict
 
 
+OPEN_PATHS = {"/health"}
+
+
+@app.middleware("http")
+async def _agent_key_gate(request, call_next):
+    """Reject unauthenticated calls before anything else runs — including body
+    validation, so an unauthenticated caller gets 401 and never 422."""
+    if request.url.path in OPEN_PATHS or request.method == "OPTIONS":
+        return await call_next(request)
+    if not keys.key_matches(request.headers.get("x-agent-key"), AGENT_KEY):
+        return JSONResponse(status_code=401, content={"detail": "invalid agent key"})
+    return await call_next(request)
+
+
 def _require_key(x_agent_key: str | None) -> None:
-    if x_agent_key != AGENT_KEY:
+    if not keys.key_matches(x_agent_key, AGENT_KEY):
         raise HTTPException(status_code=401, detail="invalid agent key")
 
 
-def _probe_healthy(endpoint: str) -> bool:
+def _probe_healthy(endpoint: str, api_key: str | None = None) -> bool:
+    req = urllib.request.Request(f"{endpoint}/models")
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
-        with urllib.request.urlopen(f"{endpoint}/models", timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status == 200
     except (urllib.error.URLError, OSError):
         return False
@@ -162,6 +215,27 @@ async def model_fit(model: str, runtime: str = "llama"):
     }
 
 
+def _port_check(spec: Spec) -> dict:
+    """The central allocates the port, but only the agent's machine knows
+    whether something else is already sitting on it."""
+    port = executor_llama.deploy_port("", spec) if spec.port else None
+    if port is None:
+        return {"name": "port", "ok": True,
+                "detail": "port will be assigned automatically"}
+    if not ports.in_range(port):
+        return {"name": "port", "ok": False,
+                "detail": f"port {port} is outside the deploy range "
+                          f"{ports.PORT_MIN}-{ports.PORT_MAX}"}
+    if ports.is_free(port):
+        return {"name": "port", "ok": True, "detail": f"port {port} is free"}
+    return {
+        "name": "port", "ok": False,
+        "detail": f"port {port} is already in use on this machine — "
+                  "something outside SursumAI is listening on it. "
+                  "Stop it, or destroy the deployment that owns this port.",
+    }
+
+
 @app.post("/preflight")
 async def preflight(req: PreflightRequest, x_agent_key: str | None = Header(None)):
     _require_key(x_agent_key)
@@ -171,6 +245,7 @@ async def preflight(req: PreflightRequest, x_agent_key: str | None = Header(None
     except SpecError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     checks = await asyncio.to_thread(_executor(spec.runtime).preflight, spec)
+    checks.insert(0, await asyncio.to_thread(_port_check, spec))
     return {"runtime": spec.runtime, "checks": checks}
 
 
@@ -188,13 +263,50 @@ async def start_deploy(req: StartRequest, x_agent_key: str | None = Header(None)
 
 SPECS: dict[str, Spec] = {}
 
+# Specs carry secrets (hf_token, api_key) and must survive an agent restart —
+# without them the health probe and the metrics scrape cannot authenticate
+# against a deploy that is still running.
+SPEC_DIR = keys.KEY_DIR / "specs"
+
+
+def _spec_file(deploy_id: str) -> Path:
+    return SPEC_DIR / f"{deploy_id}.json"
+
+
+def _persist_spec(deploy_id: str, spec: Spec) -> None:
+    try:
+        SPEC_DIR.mkdir(parents=True, exist_ok=True)
+        fd = os.open(_spec_file(deploy_id), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, json.dumps(spec.to_dict()).encode())
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def _forget_spec(deploy_id: str) -> None:
+    try:
+        _spec_file(deploy_id).unlink()
+    except OSError:
+        pass
+
 
 def _spec_for(deploy_id: str) -> Spec | None:
-    return SPECS.get(deploy_id)
+    spec = SPECS.get(deploy_id)
+    if spec is not None:
+        return spec
+    try:
+        spec = Spec.from_dict(json.loads(_spec_file(deploy_id).read_text()))
+    except (OSError, ValueError, TypeError):
+        return None
+    SPECS[deploy_id] = spec
+    return spec
 
 
 async def _deploy_job(deploy_id: str, spec: Spec) -> None:
     SPECS[deploy_id] = spec
+    _persist_spec(deploy_id, spec)
     try:
         await asyncio.to_thread(_executor(spec.runtime).start, spec, deploy_id)
     except (executor.TransportError, executor_llama.TransportError):
@@ -204,9 +316,10 @@ async def _deploy_job(deploy_id: str, spec: Spec) -> None:
 @app.get("/deploys/{deploy_id}/status")
 async def deploy_status(deploy_id: str, x_agent_key: str | None = Header(None)):
     _require_key(x_agent_key)
+    spec = _spec_for(deploy_id)
     running = executor.is_running(deploy_id) or executor_llama.is_running(deploy_id)
-    ep = executor_llama.endpoint(deploy_id, _spec_for(deploy_id))
-    healthy = _probe_healthy(ep) if running else False
+    ep = executor_llama.endpoint(deploy_id, spec)
+    healthy = _probe_healthy(ep, spec.api_key if spec else None) if running else False
     return {
         "deploy_id": deploy_id,
         "running": running,
@@ -227,8 +340,12 @@ async def deploy_metrics(deploy_id: str, x_agent_key: str | None = Header(None))
     _require_key(x_agent_key)
     if not (executor.is_running(deploy_id) or executor_llama.is_running(deploy_id)):
         raise HTTPException(status_code=404, detail="deploy not running")
+    spec = _spec_for(deploy_id)
     try:
-        return await asyncio.to_thread(metrics.scrape, executor_llama.endpoint(deploy_id, _spec_for(deploy_id)))
+        return await asyncio.to_thread(
+            metrics.scrape, executor_llama.endpoint(deploy_id, spec),
+            spec.api_key if spec else None,
+        )
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"metrics unavailable: {e}") from e
 
@@ -238,4 +355,6 @@ async def deploy_stop(deploy_id: str, x_agent_key: str | None = Header(None)):
     _require_key(x_agent_key)
     await asyncio.to_thread(executor.stop, deploy_id)
     await asyncio.to_thread(executor_llama.stop, deploy_id)
+    SPECS.pop(deploy_id, None)
+    _forget_spec(deploy_id)
     return {"deploy_id": deploy_id, "status": "stopped"}

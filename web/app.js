@@ -973,22 +973,28 @@ function switchLang(lang) {
 function buildSnippets(d) {
   const url = d.endpoint ? d.endpoint.replace(/\/v1$/, "") : "http://localhost:YOUR_PORT";
   const model = d.spec.model;
+  // every deploy is started with its own --api-key: the snippets have to send it
+  const key = d.spec.api_key || "YOUR_API_KEY";
   const python = `import requests
 
 url = "${url}/v1/chat/completions"
+headers = {"Authorization": "Bearer ${key}"}
 payload = {
     "model": "${model}",
     "messages": [{"role": "user", "content": "Hello!"}],
     "max_tokens": 512,
 }
 
-resp = requests.post(url, json=payload, timeout=120)
+resp = requests.post(url, json=payload, headers=headers, timeout=120)
 resp.raise_for_status()
 print(resp.json()["choices"][0]["message"]["content"])`;
 
   const js = `const resp = await fetch("${url}/v1/chat/completions", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: "Bearer ${key}",
+  },
   body: JSON.stringify({
     model: "${model}",
     messages: [{ role: "user", content: "Hello!" }],
@@ -1001,6 +1007,7 @@ console.log(data.choices[0].message.content);`;
 
   const curl = `curl ${url}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${key}" \\
   -d '{
     "model": "${model}",
     "messages": [{"role": "user", "content": "Hello!"}],

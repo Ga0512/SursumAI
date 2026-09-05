@@ -14,9 +14,13 @@ def _base(endpoint: str) -> str:
     return endpoint[:-3] if endpoint.rstrip("/").endswith("/v1") else endpoint.rstrip("/")
 
 
-def _scrape(endpoint: str, timeout: float = 10.0) -> dict[str, float]:
+def _scrape(endpoint: str, timeout: float = 10.0,
+            api_key: str | None = None) -> dict[str, float]:
     url = f"{_base(endpoint)}/metrics"
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
     values: dict[str, float] = {}
     for line in body.splitlines():
@@ -41,9 +45,9 @@ def _rate(cur: float, prev: float, dt: float) -> float:
     return (cur - prev) / dt
 
 
-def scrape(endpoint: str) -> dict[str, Any]:
+def scrape(endpoint: str, api_key: str | None = None) -> dict[str, Any]:
     """Scrape a live /metrics endpoint (vLLM or llama.cpp) into a unified summary."""
-    raw = _scrape(endpoint)
+    raw = _scrape(endpoint, api_key=api_key)
     now = time.time()
 
     # llama.cpp has direct throughput gauges; vLLM has histogram sums/counts.

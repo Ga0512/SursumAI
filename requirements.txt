@@ -1,5 +1,6 @@
-runpod
-fastapi
-uvicorn
-python-dotenv
-huggingface_hub
+# Pinned on purpose: an installer that resolves "latest" gives every user a
+# different build. Bump these deliberately, never implicitly.
+fastapi==0.141.1
+uvicorn==0.52.4
+huggingface_hub==1.30.0
+python-dotenv==1.2.3

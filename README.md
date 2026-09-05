@@ -1,5 +1,8 @@
 # SursumAI — Self-Hosting Models
 
+[![tests](https://github.com/Ga0512/SursumAI/actions/workflows/tests.yml/badge.svg)](https://github.com/Ga0512/SursumAI/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > Your model. Your machine. Your URL.
 
 SursumAI runs **open-source AI models on your own machine** and gives you an
@@ -42,8 +45,12 @@ use.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/main/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.7.0/install.sh | bash
 ```
+
+The installer downloads a **released tag** (never a moving branch) and checks
+the tarball against the sha256 published with that release before installing a
+single file.
 
 That's it. The installer does everything automatically:
 - downloads SursumAI (no git needed)
@@ -60,6 +67,7 @@ That's it. The installer does everything automatically:
 ```bash
 sursumai          # starts everything and opens the browser
 sursumai status   # are the services running?
+sursumai restart  # stop and start the services
 sursumai stop     # stop the services (model deployments keep running)
 ```
 
@@ -98,15 +106,20 @@ Or double-click the **SursumAI** icon in your app menu / Windows desktop.
 
 Instead of picking one model, create a **pool** of 2+ deployments and let the
 router decide who answers each message (OpenAI-style: `POST /v1/chat/completions`
-with `model="router"`). Every answer says which model served it.
+with `model="router"`). Every answer says which model served it — the `model`
+field comes back as `pool → the-model-that-answered (why)`.
 
-| Mode | How it decides | Extra latency |
-|---|---|---|
-| `escalation` | Weak answers; a judge LLM escalates to the strong model when needed; after 2 escalations the session latches to strong | Judge call per message |
-| `classifier` | A judge reads the question and picks the single best model among N (NVIDIA-style `llm_classifier`) | One judge call |
-| `advisor` | Weak answers instantly; the judge runs in the background for the next turn | None |
-| `stage` | Keyword rules (code, math, theory → strong) — no LLM | None |
-| `round_robin` | Alternates models per turn | None |
+Order the models in the pool from cheapest to strongest. That order is the
+ladder every mode reads: the first is the cheap one, the last is the one worth
+escalating to.
+
+| Mode | How it decides | Uses | Extra latency |
+|---|---|---|---|
+| `escalation` | The cheap model answers; a judge LLM escalates to the strongest when needed; after 2 escalations the session latches | first + last | Judge call per message |
+| `classifier` | A judge reads the question and picks the single best model (NVIDIA-style `llm_classifier`) | all N | One judge call |
+| `advisor` | The cheap model answers instantly; the judge runs in the background for the next turn | first + last | None |
+| `stage` | Keyword rules (code, math, theory → strongest), in English and Portuguese — no LLM | first + last | None |
+| `round_robin` | Takes the next model each turn, cycling through the whole pool | all N | None |
 
 **Session memory:** send a stable `session_id` (e.g. `harness:meu-pipeline`) and
 the router keeps per-conversation state (streak/latch) — no bookkeeping needed;
@@ -132,11 +145,21 @@ Everything you can do in the web UI, you can do from a terminal:
 
 ```bash
 sursumai login <email>                  # store your token (prompts for password)
+sursumai whoami                         # who am I logged in as?
 sursumai list                           # table of deployments
+sursumai pools                          # table of pools
 sursumai deploy <org/model>             # GGUF names auto-detect llama-server
-sursumai logs <id> --tail 300           # tail a deployment's log
+sursumai key <id>                       # print the deployment's API key
+sursumai chat <id> "hello"              # one message to a deployment…
+sursumai chat router "hello"            # …or to the router
+sursumai logs <id> --follow             # tail a deployment's log live
 sursumai destroy <id> --yes             # remove a deployment
+sursumai update                         # update to the latest release
 ```
+
+Deployment ids can be abbreviated to any unambiguous prefix. Add `--json` to
+`status`, `list`, `pools` and `whoami` for machine-readable output; every
+command exits non-zero when it fails.
 
 ## Docker (optional, recommended for GPU)
 
@@ -161,6 +184,22 @@ you so — install Docker later to unlock the GPU.
 
 Service logs: `/tmp/opencode/{agent,central,web}.log`.
 
+## Security
+
+SursumAI is a local app and is set up to stay that way.
+
+- **Loopback by default.** The three services listen on `127.0.0.1`. To reach
+  them from another machine, opt in explicitly with `SURSUMAI_BIND=0.0.0.0`.
+- **A private agent key.** On first run a random key is generated in
+  `~/.sursumai/agent.key` (readable only by you) and shared by the central and
+  the agent. If you bind to the network while still using the built-in
+  development key, the agent refuses to start.
+- **One API key per deployment.** Each model server is started with its own
+  `--api-key`, so a deployment is not open to anything that finds the port. The
+  key is in the **Details → Code** snippets, and in `sursumai key <id>`.
+- **Session tokens are stored hashed.** A copy of the database hands out no
+  working logins. (Upgrading from an older version logs everyone out once.)
+
 ## Ports
 
 | Service | Port |
@@ -168,4 +207,8 @@ Service logs: `/tmp/opencode/{agent,central,web}.log`.
 | Web (UI) | 3000 |
 | Central backend | 8001 |
 | Local agent | 8010 |
-| Deployments | 9000–9099 |
+| Deployments | 9000–9099 (allocated, one per deployment) |
+
+A deployment is given the lowest free port in that range, and the check before
+provisioning fails with a plain message if something else on the machine is
+already using it. The range holds 100 deployments at a time.

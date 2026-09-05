@@ -11,3 +11,4 @@ llama-bin/
 CLI-DESKTOP.md
 ROADMAP.md
 MVP.md
+.pytest_cache/

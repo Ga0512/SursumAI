@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
-import uuid
+import unicodedata
 
 from . import agent_client
 from .db import Store, RouterSession
@@ -10,18 +11,28 @@ from .db import Store, RouterSession
 CONFIRMATIONS = 2
 
 # ---- stage mode: rule-based routing (no LLM, zero latency) ----
+# Bilingual on purpose: an English-only prompt used to never escalate, because
+# every signal here was Portuguese. Accents are stripped before matching, so
+# only the unaccented spelling needs to be listed.
 STAGE_RULES = {
-    "math": ["matemática", "matematica", "cálculo", "calculo", "equação", "equacao",
-             "integral", "derivada", "álgebra", "algebra", "trigonometria", "prova", "teorema"],
-    "code": ["código", "codigo", "programar", "função", "funcao", "bug", "script",
-             "python", "javascript", "api", "funcao", "regex"],
-    "reasoning": ["porquê", "porque", "explique", "explica", "raciocínio",
-                  "raciocinio", "detalhes", "matemático", "matematico",
-                  "física", "fisica", "prove", "teoria", "conceito", "fundamento"],
-    "long": ["lista", "roteiro", "plano", "resumo completo", "dissertação", "dissertacao"],
+    "math": ["matematica", "calculo", "equacao", "integral", "derivada", "algebra",
+             "trigonometria", "prova", "teorema",
+             "math", "mathematics", "calculus", "equation", "derivative",
+             "algebra", "geometry", "theorem", "proof", "solve"],
+    "code": ["codigo", "programar", "funcao", "bug", "script", "python",
+             "javascript", "api", "regex",
+             "code", "coding", "program", "function", "debug", "compile",
+             "refactor", "stacktrace", "traceback", "sql"],
+    "reasoning": ["porque", "porquê", "explique", "explica", "raciocinio",
+                  "detalhes", "matematico", "fisica", "teoria", "conceito",
+                  "fundamento",
+                  "why", "explain", "reasoning", "reason", "physics", "theory",
+                  "concept", "analyze", "analyse", "compare", "derive"],
+    "long": ["lista", "roteiro", "plano", "resumo", "dissertacao",
+             "list", "outline", "plan", "essay", "summary", "step"],
 }
 
-STAGE_SIGNALS = [w for words in STAGE_RULES.values() for w in words]
+STAGE_SIGNALS = {w for words in STAGE_RULES.values() for w in words}
 
 JUDGE_PROMPT = """You are a routing judge. A weak model answered a user turn.
 Read the user's request and the weak model's reply. Decide whether the weak
@@ -39,6 +50,20 @@ Read the user request and pick the single best model for it. Consider
 strengths (math, code, vision, long answers, chat) and cost.
 
 Answer with ONLY valid JSON: {{"choice": "<model_id>", "reason": "short reason"}}"""
+
+
+def _served(deploy, decision: str, result: dict, latched: bool = False) -> dict:
+    """Uniform outcome: who answered, with what, and why."""
+    return {
+        "served": deploy.id,
+        "served_model": deploy.spec.model,
+        "served_endpoint": deploy.endpoint,
+        "decision": decision,
+        "content": _content_of(result),
+        "reasoning": _reasoning_of(result),
+        "usage": _usage_of(result),
+        "latched": latched,
+    }
 
 
 def _content_of(result: dict) -> str:
@@ -76,24 +101,39 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
+def _strip_accents(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text)
+                   if unicodedata.category(c) != "Mn")
+
+
 def _stage_wants_strong(messages: list[dict]) -> bool:
-    import re
-    text = _last_user_text(messages).lower()
-    words = set(re.findall(r"[a-zà-ú]+", text))
-    return bool(words & set(STAGE_SIGNALS))
+    """Does the last user turn look like work for the strong model?
+
+    Accents are stripped so 'matemática' and 'matematica' both hit, and the
+    signal list carries both languages.
+    """
+    text = _strip_accents(_last_user_text(messages).lower())
+    words = set(re.findall(r"[a-z0-9_]+", text))
+    return bool(words & STAGE_SIGNALS)
+
+
+def _judge_deploy(store: Store, pool):
+    """The deploy that plays judge: the pool's judge if set, else the cheapest
+    model in the pool (judging is a small, cheap call)."""
+    if pool.judge_id:
+        judge = store.get(pool.judge_id)
+        if judge is not None and judge.endpoint:
+            return judge
+    candidates = _pool_candidates(store, pool)
+    return candidates[0] if candidates else None
 
 
 def _judge(store: Store, pool, session_id: str, user_id: str,
            messages: list[dict], weak_reply: str) -> bool:
-    judge_endpoint = None
-    if pool.judge_id:
-        judge = store.get(pool.judge_id)
-        judge_endpoint = judge.endpoint if judge else None
-    if judge_endpoint is None:
-        weak = store.get(pool.weak_id)
-        judge_endpoint = weak.endpoint if weak else None
-    if judge_endpoint is None:
+    judge = _judge_deploy(store, pool)
+    if judge is None:
         return False
+    judge_endpoint = judge.endpoint
     payload = {
         "model": "judge",
         "messages": [
@@ -108,7 +148,8 @@ def _judge(store: Store, pool, session_id: str, user_id: str,
         "stream": False,
     }
     try:
-        result = agent_client.chat(judge_endpoint, payload, timeout=60.0)
+        result = agent_client.chat(judge_endpoint, payload, timeout=60.0,
+                                   api_key=judge.spec.api_key)
     except agent_client.AgentError:
         return False
     try:
@@ -119,112 +160,72 @@ def _judge(store: Store, pool, session_id: str, user_id: str,
         return False
 
 
-def _decision_label(latched: bool, escalated: bool, served: str) -> str:
-    if latched:
-        return "latched"
-    return "escalated" if escalated else "weak_ok"
+def _ladder(store: Store, pool) -> list:
+    """The pool's deploys, weakest first, all with a live endpoint.
+
+    A pool holds N models, ordered by the user. Every mode reads that same
+    ladder: the first entry is the cheap one, the last is the one worth
+    escalating to, and round_robin walks the whole thing.
+    """
+    candidates = _pool_candidates(store, pool)
+    if len(candidates) < 2:
+        missing = [d for d in (store.get_pool_models(pool.id)
+                               or [pool.weak_id, pool.strong_id]) if d]
+        raise ValueError(
+            f"pool '{pool.name}' needs at least 2 running models, found "
+            f"{len(candidates)} of {len(missing)} — check that they are healthy"
+        )
+    return candidates
 
 
-def _chat(endpoint: str, model: str, messages: list[dict], max_tokens: int,
-          temperature: float | None, stream: bool = False) -> dict:
-    payload: dict = {"model": model, "messages": messages,
-                     "max_tokens": max_tokens, "stream": stream}
+def _weak_strong(store: Store, pool):
+    """The two ends of the ladder: cheapest and strongest."""
+    ladder = _ladder(store, pool)
+    return ladder[0], ladder[-1]
+
+
+def _chat(deploy, messages: list[dict], max_tokens: int,
+          temperature: float | None) -> dict:
+    """One non-streaming completion against a deploy, with its own bearer key."""
+    payload: dict = {
+        "model": deploy.spec.model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
     if temperature is not None:
         payload["temperature"] = temperature
-    if stream:
-        return payload
-    return agent_client.chat(endpoint, payload)
+    return agent_client.chat(deploy.endpoint, payload, api_key=deploy.spec.api_key)
 
 
 def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
                      messages: list[dict], max_tokens: int,
                      temperature: float | None) -> dict:
     """Default: weak responds, LLM judge decides, streak>=2 latches to strong."""
-    weak = store.get(pool.weak_id)
-    strong = store.get(pool.strong_id)
-    if weak is None or weak.endpoint is None:
-        raise ValueError(f"weak deploy {pool.weak_id} has no endpoint")
-    if strong is None or strong.endpoint is None:
-        raise ValueError(f"strong deploy {pool.strong_id} has no endpoint")
-
-    base = {"messages": messages, "max_tokens": max_tokens, "stream": False}
-    if temperature is not None:
-        base["temperature"] = temperature
+    weak, strong = _weak_strong(store, pool)
 
     if session.latched:
-        result = agent_client.chat(strong.endpoint, {**base, "model": strong.spec.model})
-        return {
-            "served": strong.id,
-            "decision": _decision_label(True, False, strong.id),
-            "content": _content_of(result),
-            "reasoning": _reasoning_of(result),
-            "usage": _usage_of(result),
-            "latched": True,
-        }
+        return _served(strong, "latched", _chat(strong, messages, max_tokens, temperature),
+                       latched=True)
 
-    weak_payload = {**base, "model": weak.spec.model}
-    weak_result = agent_client.chat(weak.endpoint, weak_payload)
+    weak_result = _chat(weak, messages, max_tokens, temperature)
     weak_content = _content_of(weak_result)
+    bad = not _is_ok(weak_content, weak_result)
+    escalate = bad or _judge(store, pool, session.id, user_id, messages, weak_content)
 
-    if not _is_ok(weak_content, weak_result):
-        session.streak += 1
-        if session.streak >= CONFIRMATIONS:
-            session.latched = True
-            result = agent_client.chat(strong.endpoint, {**base, "model": strong.spec.model})
-            store.upsert_router_session(session)
-            return {
-                "served": strong.id,
-                "decision": "escalated",
-                "content": _content_of(result),
-                "reasoning": _reasoning_of(result),
-                "usage": _usage_of(result),
-                "latched": True,
-            }
+    if not escalate:
+        session.streak = 0
         store.upsert_router_session(session)
-        return {
-            "served": weak.id,
-            "decision": "weak_bad",
-            "content": weak_content,
-            "reasoning": _reasoning_of(weak_result),
-            "usage": _usage_of(weak_result),
-            "latched": False,
-        }
+        return _served(weak, "weak_ok", weak_result)
 
-    escalate = _judge(store, pool, session.id, user_id, messages, weak_content)
-    if escalate:
-        session.streak += 1
-        if session.streak >= CONFIRMATIONS:
-            session.latched = True
-            result = agent_client.chat(strong.endpoint, {**base, "model": strong.spec.model})
-            store.upsert_router_session(session)
-            return {
-                "served": strong.id,
-                "decision": "escalated",
-                "content": _content_of(result),
-                "reasoning": _reasoning_of(result),
-                "usage": _usage_of(result),
-                "latched": True,
-            }
+    session.streak += 1
+    if session.streak >= CONFIRMATIONS:
+        session.latched = True
         store.upsert_router_session(session)
-        return {
-            "served": weak.id,
-            "decision": "weak_ok",
-            "content": weak_content,
-            "reasoning": _reasoning_of(weak_result),
-            "usage": _usage_of(weak_result),
-            "latched": False,
-        }
-
-    session.streak = 0
+        return _served(strong, "escalated", _chat(strong, messages, max_tokens, temperature),
+                       latched=True)
     store.upsert_router_session(session)
-    return {
-        "served": weak.id,
-        "decision": "weak_ok",
-        "content": weak_content,
-        "reasoning": _reasoning_of(weak_result),
-        "usage": _usage_of(weak_result),
-        "latched": False,
-    }
+    return _served(weak, "weak_bad" if bad else "weak_ok", weak_result)
 
 
 def _run_judge_async(store: Store, pool, session_id: str, user_id: str,
@@ -243,116 +244,53 @@ def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
                   temperature: float | None) -> dict:
     """Serve the weak reply immediately (zero added latency); judge runs in
     background and decides the latch for the NEXT turn."""
-    weak = store.get(pool.weak_id)
-    if weak is None or weak.endpoint is None:
-        raise ValueError(f"weak deploy {pool.weak_id} has no endpoint")
+    weak, strong = _weak_strong(store, pool)
 
-    weak_payload = {"messages": messages, "max_tokens": max_tokens, "stream": False,
-                    "model": weak.spec.model}
-    if temperature is not None:
-        weak_payload["temperature"] = temperature
-    weak_result = agent_client.chat(weak.endpoint, weak_payload)
+    weak_result = _chat(weak, messages, max_tokens, temperature)
     weak_content = _content_of(weak_result)
 
-    if session.latched:
-        # latched: strong served, but still decide for next turn
-        strong = store.get(pool.strong_id)
-        result = agent_client.chat(strong.endpoint, {
-            "messages": messages, "max_tokens": max_tokens, "stream": False,
-            "model": strong.spec.model, **({"temperature": temperature} if temperature is not None else {}),
-        })
+    def _judge_later() -> None:
         threading.Thread(
-            target=_run_judge_async, args=(store, pool, session.id, user_id, messages, weak_content),
+            target=_run_judge_async,
+            args=(store, pool, session.id, user_id, messages, weak_content),
             daemon=True,
         ).start()
-        return {
-            "served": strong.id,
-            "decision": "latched",
-            "content": _content_of(result),
-            "reasoning": _reasoning_of(result),
-            "usage": _usage_of(result),
-            "latched": True,
-        }
 
-    threading.Thread(
-        target=_run_judge_async, args=(store, pool, session.id, user_id, messages, weak_content),
-        daemon=True,
-    ).start()
-    return {
-        "served": weak.id,
-        "decision": "advisor",
-        "content": weak_content,
-        "reasoning": _reasoning_of(weak_result),
-        "usage": _usage_of(weak_result),
-        "latched": False,
-    }
+    if session.latched:
+        # latched: strong serves, but the judge still decides the next turn
+        result = _chat(strong, messages, max_tokens, temperature)
+        _judge_later()
+        return _served(strong, "latched", result, latched=True)
+
+    _judge_later()
+    return _served(weak, "advisor", weak_result)
 
 
 def route_stage(store: Store, pool, session: RouterSession, user_id: str,
                 messages: list[dict], max_tokens: int,
                 temperature: float | None) -> dict:
     """Rule-based routing (no LLM): keyword heuristics pick weak or strong."""
-    weak = store.get(pool.weak_id)
-    strong = store.get(pool.strong_id)
-    if weak is None or weak.endpoint is None:
-        raise ValueError(f"weak deploy {pool.weak_id} has no endpoint")
-    if strong is None or strong.endpoint is None:
-        raise ValueError(f"strong deploy {pool.strong_id} has no endpoint")
-
+    weak, strong = _weak_strong(store, pool)
     if session.latched or _stage_wants_strong(messages):
-        result = agent_client.chat(strong.endpoint, {
-            "messages": messages, "max_tokens": max_tokens, "stream": False,
-            "model": strong.spec.model, **({"temperature": temperature} if temperature is not None else {}),
-        })
-        return {
-            "served": strong.id,
-            "decision": "strong",
-            "content": _content_of(result),
-            "reasoning": _reasoning_of(result),
-            "usage": _usage_of(result),
-            "latched": session.latched,
-        }
-    result = agent_client.chat(weak.endpoint, {
-        "messages": messages, "max_tokens": max_tokens, "stream": False,
-        "model": weak.spec.model, **({"temperature": temperature} if temperature is not None else {}),
-    })
-    return {
-        "served": weak.id,
-        "decision": "weak",
-        "content": _content_of(result),
-        "reasoning": _reasoning_of(result),
-        "usage": _usage_of(result),
-        "latched": False,
-    }
+        return _served(strong, "strong", _chat(strong, messages, max_tokens, temperature),
+                       latched=session.latched)
+    return _served(weak, "weak", _chat(weak, messages, max_tokens, temperature))
 
 
 def route_round_robin(store: Store, pool, session: RouterSession, user_id: str,
                       messages: list[dict], max_tokens: int,
                       temperature: float | None) -> dict:
-    """Alternate weak/strong per turn (round-robin load balancing)."""
-    weak = store.get(pool.weak_id)
-    strong = store.get(pool.strong_id)
-    if weak is None or weak.endpoint is None:
-        raise ValueError(f"weak deploy {pool.weak_id} has no endpoint")
-    if strong is None or strong.endpoint is None:
-        raise ValueError(f"strong deploy {pool.strong_id} has no endpoint")
+    """Take the next model in the pool, cycling through all N of them."""
+    target, decision = _round_robin_pick(store, pool, session)
+    return _served(target, decision, _chat(target, messages, max_tokens, temperature))
 
-    pick_strong = (session.streak % 2) == 1
+
+def _round_robin_pick(store: Store, pool, session: RouterSession):
+    ladder = _ladder(store, pool)
+    index = session.streak % len(ladder)
     session.streak += 1
     store.upsert_router_session(session)
-    target, model, decision = (strong, strong.spec.model, "strong") if pick_strong else (weak, weak.spec.model, "weak")
-    result = agent_client.chat(target.endpoint, {
-        "messages": messages, "max_tokens": max_tokens, "stream": False,
-        "model": model, **({"temperature": temperature} if temperature is not None else {}),
-    })
-    return {
-        "served": target.id,
-        "decision": decision,
-        "content": _content_of(result),
-        "reasoning": _reasoning_of(result),
-        "usage": _usage_of(result),
-        "latched": False,
-    }
+    return ladder[index], f"round_robin[{index + 1}/{len(ladder)}]"
 
 
 def _pool_candidates(store: Store, pool) -> list:
@@ -369,19 +307,17 @@ def _pool_candidates(store: Store, pool) -> list:
     return candidates
 
 
-def _classifier_choice(store: Store, pool, candidates: list, messages: list[dict]) -> str:
+def _classifier_choice(store: Store, pool, candidates: list,
+                       messages: list[dict]) -> str | None:
     """Ask the judge model which candidate answers. Returns a deploy id;
     falls back to the first candidate on any failure (fails open)."""
-    judge_endpoint = None
-    if pool.judge_id:
-        judge = store.get(pool.judge_id)
-        judge_endpoint = judge.endpoint if judge else None
-    if judge_endpoint is None and candidates:
-        judge_endpoint = candidates[0].endpoint
+    judge = _judge_deploy(store, pool)
+    if judge is None and candidates:
+        judge = candidates[0]
+    if judge is None:
+        return None
 
-    lines = "\n".join(
-        f"{c.id}: {c.spec.model}" for c in candidates
-    )
+    lines = "\n".join(f"{c.id}: {c.spec.model}" for c in candidates)
     payload = {
         "model": "router-classifier",
         "messages": [
@@ -393,7 +329,8 @@ def _classifier_choice(store: Store, pool, candidates: list, messages: list[dict
         "stream": False,
     }
     try:
-        result = agent_client.chat(judge_endpoint, payload, timeout=60.0)
+        result = agent_client.chat(judge.endpoint, payload, timeout=60.0,
+                                   api_key=judge.spec.api_key)
         raw = _content_of(result)
         verdict = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
         choice = str(verdict.get("choice", ""))
@@ -404,29 +341,21 @@ def _classifier_choice(store: Store, pool, candidates: list, messages: list[dict
     return candidates[0].id if candidates else None
 
 
+def _classifier_target(store: Store, pool, messages: list[dict]):
+    candidates = _pool_candidates(store, pool)
+    if not candidates:
+        raise ValueError(f"pool {pool.name} has no deploy with an endpoint")
+    chosen_id = _classifier_choice(store, pool, candidates, messages)
+    return next((c for c in candidates if c.id == chosen_id), candidates[0])
+
+
 def route_classifier(store: Store, pool, session: RouterSession, user_id: str,
                      messages: list[dict], max_tokens: int,
                      temperature: float | None) -> dict:
     """NVIDIA-style llm_classifier: a judge reads the request and picks the
-    single best model among the pool's N candidates."""
-    candidates = _pool_candidates(store, pool)
-    if not candidates:
-        raise ValueError(f"pool {pool.name} has no deploy with endpoint")
-
-    chosen_id = _classifier_choice(store, pool, candidates, messages)
-    chosen = next((c for c in candidates if c.id == chosen_id), candidates[0])
-    result = agent_client.chat(chosen.endpoint, {
-        "messages": messages, "max_tokens": max_tokens, "stream": False,
-        "model": chosen.spec.model, **({"temperature": temperature} if temperature is not None else {}),
-    })
-    return {
-        "served": chosen.id,
-        "decision": "classifier",
-        "content": _content_of(result),
-        "reasoning": _reasoning_of(result),
-        "usage": _usage_of(result),
-        "latched": False,
-    }
+    single best model among the N candidates of the pool."""
+    chosen = _classifier_target(store, pool, messages)
+    return _served(chosen, "classifier", _chat(chosen, messages, max_tokens, temperature))
 
 
 ROUTE_MODES = {
@@ -438,12 +367,43 @@ ROUTE_MODES = {
 }
 
 
+def pick_target(store: Store, pool, session: RouterSession,
+                messages: list[dict]) -> tuple | None:
+    """Decide who answers WITHOUT generating anything, when the mode allows it.
+
+    Returns (deploy, decision) so the caller can stream tokens straight from
+    the chosen model. Returns None for the modes that can only decide after
+    reading a first reply (escalation and advisor while not latched) — those
+    have to generate before they can route.
+    """
+    mode = pool.mode if pool.mode in ROUTE_MODES else "escalation"
+
+    if session.latched and mode in ("escalation", "advisor", "stage"):
+        _, strong = _weak_strong(store, pool)
+        return strong, "latched"
+
+    if mode == "stage":
+        weak, strong = _weak_strong(store, pool)
+        if _stage_wants_strong(messages):
+            return strong, "strong"
+        return weak, "weak"
+
+    if mode == "round_robin":
+        return _round_robin_pick(store, pool, session)
+
+    if mode == "classifier":
+        return _classifier_target(store, pool, messages), "classifier"
+
+    return None
+
+
 def route_turn(store: Store, pool, session: RouterSession, user_id: str,
                messages: list[dict], max_tokens: int = 512,
                temperature: float | None = None) -> dict:
     """Run one routing turn against a pool, dispatching by pool.mode.
 
-    Returns {"served": deploy_id, "decision": str, "content": str,
+    Returns {"served": deploy_id, "served_model": str, "served_endpoint": str,
+             "decision": str, "content": str, "reasoning": str,
              "usage": dict, "latched": bool}.
     """
     handler = ROUTE_MODES.get(pool.mode, route_escalation)

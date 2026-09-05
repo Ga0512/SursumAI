@@ -17,6 +17,7 @@ from pathlib import Path
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.errors import RepositoryNotFoundError
 
+from core import ports
 from core.spec import Spec
 
 # Runtime strategy: NVIDIA GPU -> docker image (CUDA); otherwise -> native binary
@@ -25,7 +26,6 @@ from core.spec import Spec
 # get CUDA without compiling from source; on machines without an NVIDIA GPU the
 # tiny native binary is faster to bring up than a multi-GB docker image.
 IMAGE = "ghcr.io/ggml-org/llama.cpp:server"
-BASE_PORT = 9000
 LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "llama-models"
 BIN_DIR = Path(__file__).resolve().parent.parent / "llama-bin"
@@ -48,10 +48,14 @@ class TransportError(Exception):
 
 
 def deploy_port(deploy_id: str, spec: Spec | None = None) -> int:
+    """The port this deploy listens on.
+
+    The central allocates it and puts it in the spec. The hash fallback is
+    only for deploys created before allocation existed — see core.ports.
+    """
     if spec is not None and spec.port:
         return spec.port
-    digest = int(hashlib.sha256(deploy_id.encode()).hexdigest()[:8], 16)
-    return BASE_PORT + (digest % 100)
+    return ports.legacy_port(deploy_id)
 
 
 def endpoint(deploy_id: str, spec: Spec | None = None) -> str:
@@ -551,6 +555,8 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "--metrics",
         "--cache-reuse", "1",
     ]
+    if spec.api_key:
+        cmd += ["--api-key", spec.api_key]
     if paths.get("mmproj"):
         cmd += ["--mmproj", f"/models/{Path(paths['mmproj']).name}"]
     return cmd
@@ -571,6 +577,8 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
     ]
     if _runtime_strategy() in ("vulkan", "cuda"):
         cmd += ["-ngl", "999"]
+    if spec.api_key:
+        cmd += ["--api-key", spec.api_key]
     if paths.get("mmproj"):
         cmd += ["--mmproj", paths["mmproj"]]
     return cmd

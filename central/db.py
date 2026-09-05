@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import ports
 from core.spec import Spec
+
+from . import auth
 
 
 def _default_db_path() -> Path:
@@ -66,9 +70,9 @@ class User:
 
 
 class Session:
-    def __init__(self, token: str, user_id: str, expires_at: float,
+    def __init__(self, token_hash: str, user_id: str, expires_at: float,
                  created_at: str | None = None):
-        self.token = token
+        self.token_hash = token_hash
         self.user_id = user_id
         self.expires_at = expires_at
         self.created_at = created_at or _now()
@@ -159,6 +163,7 @@ class RouterSession:
 
 class Store:
     def __init__(self, path: Path = DB_PATH):
+        self._port_lock = threading.Lock()
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -177,16 +182,24 @@ class Store:
             )
             """
         )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                token TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at REAL NOT NULL
+        # sessions are keyed by sha256(token) — the plaintext bearer never
+        # touches the disk. A pre-hash database has a `token` column: drop it
+        # (those sessions cannot be migrated, everyone simply logs in again).
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")]
+        if cols and "token_hash" not in cols:
+            self._conn.execute("DROP TABLE sessions")
+            cols = []
+        if not cols:
+            self._conn.execute(
+                """
+                CREATE TABLE sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at REAL NOT NULL
+                )
+                """
             )
-            """
-        )
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(deploys)")]
         if not cols:
             self._conn.execute(
@@ -198,16 +211,27 @@ class Store:
                     status TEXT NOT NULL,
                     endpoint TEXT,
                     preflight TEXT,
+                    port INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     error TEXT
                 )
                 """
             )
-        elif "user_id" not in cols:
-            self._conn.execute("ALTER TABLE deploys ADD COLUMN user_id TEXT")
-        elif "preflight" not in cols:
-            self._conn.execute("ALTER TABLE deploys ADD COLUMN preflight TEXT")
+        else:
+            if "user_id" not in cols:
+                self._conn.execute("ALTER TABLE deploys ADD COLUMN user_id TEXT")
+            if "preflight" not in cols:
+                self._conn.execute("ALTER TABLE deploys ADD COLUMN preflight TEXT")
+            if "port" not in cols:
+                self._conn.execute("ALTER TABLE deploys ADD COLUMN port INTEGER")
+                self._backfill_ports()
+        # One deploy per port, enforced by the database rather than by whoever
+        # remembers to check. Partial index: legacy rows (port NULL) are exempt.
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_deploys_port "
+            "ON deploys(port) WHERE port IS NOT NULL"
+        )
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS metrics (
@@ -216,6 +240,10 @@ class Store:
                 payload TEXT NOT NULL
             )
             """
+        )
+        # every metrics read is "this deploy, newest first"
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metrics_deploy_ts ON metrics(deploy_id, ts DESC)"
         )
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(pools)")]
         if not cols:
@@ -325,33 +353,93 @@ class Store:
 
     def create_session(self, token: str, user_id: str, expires_at: float) -> None:
         self._conn.execute(
-            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (token, user_id, _now(), expires_at),
+            "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (auth.hash_token(token), user_id, _now(), expires_at),
         )
         self._conn.commit()
 
     def get_user_by_token(self, token: str) -> User | None:
+        token_hash = auth.hash_token(token)
         row = self._conn.execute(
-            "SELECT * FROM sessions WHERE token = ?", (token,)
+            "SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)
         ).fetchone()
         if not row:
             return None
         if row["expires_at"] < time.time():
-            self._conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            self._conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
             self._conn.commit()
             return None
         return self.get_user_by_id(row["user_id"])
 
     def delete_session(self, token: str) -> None:
-        self._conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        self._conn.execute(
+            "DELETE FROM sessions WHERE token_hash = ?", (auth.hash_token(token),)
+        )
+        self._conn.commit()
+
+    def purge_expired_sessions(self) -> None:
+        self._conn.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
         self._conn.commit()
 
     # ---- deploys ----
 
+    def _backfill_ports(self) -> None:
+        """Move the port out of the spec JSON and into its own column.
+
+        Deploys created before ports were allocated have no port at all: they
+        are left NULL and keep answering on their hashed port. Two of those can
+        already share a port — that is the bug — but rewriting a running
+        deploy's port here would only break it further; they get a real port
+        the next time they are redeployed.
+        """
+        taken: set[int] = set()
+        for row in self._conn.execute("SELECT id, spec FROM deploys").fetchall():
+            try:
+                port = json.loads(row["spec"]).get("port")
+            except (ValueError, TypeError):
+                continue
+            if not ports.in_range(port) or port in taken:
+                continue
+            taken.add(port)
+            self._conn.execute("UPDATE deploys SET port = ? WHERE id = ?", (port, row["id"]))
+        self._conn.commit()
+
+    def taken_ports(self, exclude_id: str | None = None) -> set[int]:
+        """Every port currently spoken for, allocated or legacy-hashed."""
+        taken: set[int] = set()
+        for row in self._conn.execute("SELECT id, port FROM deploys").fetchall():
+            if exclude_id is not None and row["id"] == exclude_id:
+                continue
+            if row["port"] is not None:
+                taken.add(row["port"])
+            else:
+                # no allocated port: it is listening on its hashed one
+                taken.add(ports.legacy_port(row["id"]))
+        return taken
+
+    def allocate_port(self, exclude_id: str | None = None) -> int:
+        """Reserve the lowest free deploy port.
+
+        Held under a lock and re-checked against the UNIQUE index on write, so
+        two deploys created at the same moment cannot land on the same port.
+        """
+        with self._port_lock:
+            return ports.first_free(self.taken_ports(exclude_id))
+
     def create(self, spec: Spec, user_id: str) -> Deploy:
-        deploy = Deploy(spec, user_id)
-        self._upsert(deploy)
-        return deploy
+        """Create a deploy, allocating its port if it does not have one."""
+        with self._port_lock:
+            for _ in range(len(ports.PORT_RANGE)):
+                if not ports.in_range(spec.port):
+                    spec.port = ports.first_free(self.taken_ports())
+                deploy = Deploy(spec, user_id)
+                try:
+                    self._upsert(deploy)
+                    return deploy
+                except sqlite3.IntegrityError:
+                    # someone took that port between the read and the write
+                    spec.port = None
+            raise ports.NoPortAvailable("could not reserve a deploy port")
 
     def get(self, id: str) -> Deploy | None:
         row = self._conn.execute("SELECT * FROM deploys WHERE id = ?", (id,)).fetchone()
@@ -379,10 +467,32 @@ class Store:
         self._conn.execute("DELETE FROM metrics WHERE deploy_id = ?", (deploy_id,))
         self._conn.commit()
 
+    # One snapshot every 10s per deploy adds up to ~8600 rows a day, forever.
+    # The UI only ever reads the last few hundred, so older rows are dead
+    # weight that slows every dashboard poll down.
+    METRICS_KEEP = 1080  # ~3h of history at one snapshot per 10s
+
     def save_metrics(self, deploy_id: str, payload: dict) -> None:
         self._conn.execute(
             "INSERT INTO metrics (deploy_id, ts, payload) VALUES (?, ?, ?)",
             (deploy_id, payload.get("ts", time.time()), json.dumps(payload)),
+        )
+        self._conn.commit()
+        self._prune_metrics(deploy_id)
+
+    def _prune_metrics(self, deploy_id: str) -> None:
+        """Drop everything older than the newest METRICS_KEEP snapshots."""
+        self._conn.execute(
+            """
+            DELETE FROM metrics
+            WHERE deploy_id = ? AND ts < (
+                SELECT MIN(ts) FROM (
+                    SELECT ts FROM metrics WHERE deploy_id = ?
+                    ORDER BY ts DESC LIMIT ?
+                )
+            )
+            """,
+            (deploy_id, deploy_id, self.METRICS_KEEP),
         )
         self._conn.commit()
 
@@ -403,13 +513,14 @@ class Store:
     def _upsert(self, deploy: Deploy) -> None:
         self._conn.execute(
             """
-            INSERT INTO deploys (id, user_id, spec, status, endpoint, preflight, created_at, updated_at, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO deploys (id, user_id, spec, status, endpoint, preflight, port, created_at, updated_at, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 spec=excluded.spec,
                 status=excluded.status,
                 endpoint=excluded.endpoint,
                 preflight=excluded.preflight,
+                port=excluded.port,
                 updated_at=excluded.updated_at,
                 error=excluded.error
             """,
@@ -420,6 +531,7 @@ class Store:
                 deploy.status,
                 deploy.endpoint,
                 json.dumps(deploy.preflight) if deploy.preflight is not None else None,
+                deploy.spec.port if ports.in_range(deploy.spec.port) else None,
                 deploy.created_at,
                 deploy.updated_at,
                 deploy.error,

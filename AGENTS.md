@@ -18,11 +18,48 @@
 
 - SursumAI rodando como **3 processos separados** (arquitetura do ROADMAP.md): Web (3000), Backend Central (8001), Local Agent (8010).
 - `qwen-vllm/`, `qwen-hf/`, `qwen-ollama/` e os entrypoints `api_server.py`/`handler.py`/Dockerfiles **não fazem mais parte do produto** (ficaram no histórico; `requirements.txt` ainda tem runpod para driver futuro).
-- Não há testes, linter, typecheck, CI nem config de ferramenta. Validação = subir + chamar API.
+- Testes com pytest em `tests/` (`python -m pytest`, 250 casos) + CI no GitHub Actions. Não há linter nem typecheck de Python.
 - **Auth real**: email+senha com PBKDF2, sessões/tokens bearer. `user_id` é o ponto em comum de todos os dados (deploys/métricas).
 - **API 100% default (não-negociável)**: não mexer no thinking do modelo — sem `enable_thinking:false` default. Reasoning/thinking é parte de `completion_tokens` e conta (verificado empiricamente: delta do gauge == `usage.completion_tokens`). Qwen3.5 pode gastar todo o contexto em reasoning (`content` vazio, `finish:length`) — aceito.
 - **Detail modal (RunPod-style)** com 3 abas: Metrics (grid com sparkline; llama mostra "—" em requests/failed/KV/TTFT/latency pois llama.cpp não expõe), Test (playground dark com `reasoning_content` colapsado + content + meta de uso), Code (snippets Python/JS/curl). Card clicável + botão Details.
 - **VLM no playground**: proxy de chat (`POST /deploys/{id}/chat`) aceita `messages: list[dict]` genérico — o tab Test manda `image_url` (base64 data URL) quando há imagem. Botão "Image" só habilita se o preflight tem check `vision.ok`.
+
+## Segurança (não regredir)
+
+- **Bind em `127.0.0.1` por padrão** nos 3 processos. Rede só via `SURSUMAI_BIND`
+  (`start.sh`, `web/server.py`, CLI). Nunca voltar `0.0.0.0` como default.
+- **`AGENT_KEY`** vem de `core/keys.py`: gerada aleatória no 1º run em
+  `~/.sursumai/agent.key` (0600), compartilhada por central e agent. `AGENT_KEY`
+  no ambiente ganha. Comparação sempre com `hmac.compare_digest`
+  (`keys.key_matches`). O agent **recusa subir** com a chave de dev se não
+  estiver em loopback.
+- A checagem de chave do agent é um **middleware** (`_agent_key_gate`), não só a
+  dependência `_require_key`: o FastAPI valida o corpo antes das dependências, e
+  sem o middleware um chamador não autenticado recebia 422 em vez de 401.
+- **Uma API key por deploy** (`Spec.api_key`, gerada em `POST /deploys`),
+  passada como `--api-key` para vLLM e llama-server. Toda chamada ao endpoint do
+  deploy — playground, router, judge, health probe, scrape de métricas — manda
+  esse bearer. Os specs são persistidos em `~/.sursumai/specs/` (0600) para
+  sobreviverem a um restart do agent, senão as probes perdem a chave.
+- **Tokens de sessão são guardados com sha256** (`sessions.token_hash`). A
+  migração dropa a tabela antiga: todo mundo faz login de novo, uma vez.
+- **Instalador em tag fixa + checksum**: `install.sh` instala `v<X.Y.Z>`, nunca
+  `main`, e confere o sha256 publicado no release. O update (UI e CLI) busca o
+  installer da própria tag.
+
+## Portas e pools (não regredir)
+
+- **Porta é alocada pelo central**, nunca derivada de hash: menor livre em
+  9000-9099, `UNIQUE INDEX` parcial em `deploys.port`, preflight do agent
+  confere se está livre na máquina. `core/ports.legacy_port()` só existe para
+  deploys antigos (`port NULL`) continuarem respondendo.
+- **Pools são de N modelos**: `_ladder()` (primeiro = barato, último = forte).
+  `round_robin` e `classifier` usam todos; os outros usam as duas pontas.
+  `weak_id`/`strong_id` são legado.
+- **Métricas são podadas** (`Store.METRICS_KEEP`) — a tabela crescia sem fim.
+- **Nada de `except Exception: pass`** — `log.debug` para o esperado,
+  `log.exception` para o resto.
+- CI em `.github/workflows/tests.yml`: pytest (3.10/3.12), shellcheck, node --check.
 
 ## Arquitetura (SursumAI)
 
@@ -48,6 +85,8 @@ web/server.py (3000, estático) ──► central/app.py (8001) ──► agent/
 
 ```bash
 bash start.sh            # sobe os 3 processos (persistente, NÃO apaga sursumai.db)
+python -m pytest         # testes (deps: requirements-dev.txt)
+python -m pytest tests/test_spec.py::test_defaults_are_valid   # um teste só
 .venv/bin/python -m uvicorn agent.app:app --port 8010
 .venv/bin/python -m uvicorn central.app:app --port 8001
 .venv/bin/python web/server.py --port 3000
@@ -56,7 +95,7 @@ bash start.sh            # sobe os 3 processos (persistente, NÃO apaga sursumai
 - Logs dos processos: `/tmp/opencode/{agent,central,web}.log`.
 - Porta 8000 pertence a **outro projeto** (`omnihunter-process-images`) — NÃO usar 8000.
 - `sursumai.db` + `sursumai-logs/` são ignorados pelo git (.gitignore).
-- vLLM vem da imagem docker; **não** está em `requirements.txt` (fastapi, uvicorn, python-dotenv, runpod).
+- vLLM vem da imagem docker; **não** está em `requirements.txt` (fastapi, uvicorn, huggingface_hub, python-dotenv — todos pinados com `==`). `runpod` foi removido (não era usado).
 
 ## Peculiaridades
 

@@ -1,0 +1,9 @@
+# SursumAI runs on Linux/WSL. A CRLF in a shell script or in the CLI's shebang
+# makes it fail with a message that explains nothing ("bad interpreter"), so
+# line endings are LF in the repository regardless of who commits.
+* text=auto eol=lf
+
+*.png binary
+*.svg text eol=lf
+sursumai/bin/sursumai text eol=lf
+*.sh text eol=lf

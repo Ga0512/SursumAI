@@ -8,18 +8,43 @@
 #
 # Overrides (env):
 #   SURSUMAI_REPO        github repo to fetch the tarball from (default Ga0512/SursumAI)
-#   SURSUMAI_VERSION     branch/tag (default main)
+#   SURSUMAI_VERSION     released tag to install (default: the pinned tag below)
 #   SURSUMAI_TARBALL_URL full tarball URL (takes precedence over repo+version)
+#   SURSUMAI_SHA256      expected sha256 of the tarball (skips the published one)
 #   SURSUMAI_DIR         install dir (default $HOME/sursumai)
 #   SURSUMAI_SRC_DIR     use a local source dir instead of downloading (dev/testing)
+#
+# Installs a released TAG, never a moving branch: what you install today is
+# byte-for-byte what you installed yesterday, and the tarball is checked
+# against the sha256 published with the release before a single file is used.
 #
 # Idempotent: re-running updates the code but never deletes sursumai.db / logs.
 
 set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
-SURSUMAI_VERSION="${SURSUMAI_VERSION:-main}"
-SURSUMAI_TARBALL_URL="${SURSUMAI_TARBALL_URL:-https://github.com/$SURSUMAI_REPO/archive/refs/heads/$SURSUMAI_VERSION.tar.gz}"
+# Pinned release. Bump together with the VERSION file when cutting a release.
+SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.7.0}"
+SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
+
+RELEASE_BASE="https://github.com/$SURSUMAI_REPO/releases/download/$SURSUMAI_VERSION"
+
+# The release ships its own tarball as an asset. GitHub's auto-generated
+# source archives are NOT byte-stable over time (their compression has changed
+# before, invalidating every published checksum), and this installer aborts on
+# a mismatch — so a checksum taken from one of those would eventually brick
+# installs on its own. An uploaded asset never changes after publication.
+SURSUMAI_ASSET="sursumai-${SURSUMAI_VERSION#v}.tar.gz"
+SURSUMAI_TARBALL_URL="${SURSUMAI_TARBALL_URL:-$RELEASE_BASE/$SURSUMAI_ASSET}"
+SURSUMAI_SHA256_URL="$RELEASE_BASE/SHA256SUMS"
+
+case "$SURSUMAI_VERSION" in
+  v[0-9]*) ;;
+  *)  # a branch, for development only: no release assets exist for it
+      SURSUMAI_TARBALL_URL="https://github.com/$SURSUMAI_REPO/archive/refs/heads/$SURSUMAI_VERSION.tar.gz"
+      SURSUMAI_SHA256_URL=""
+      ;;
+esac
 SURSUMAI_DIR="${SURSUMAI_DIR:-$HOME/sursumai}"
 SURSUMAI_SRC_DIR="${SURSUMAI_SRC_DIR:-}"
 BIN_DIR="$HOME/.local/bin"
@@ -46,6 +71,44 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl not found. Install curl first."
 command -v tar  >/dev/null 2>&1 || fail "tar not found."
+
+# --- integrity -----------------------------------------------------------------
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d" " -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d" " -f1
+  else
+    echo ""
+  fi
+}
+
+verify_checksum() {
+  local file="$1" expected="$SURSUMAI_SHA256" actual
+
+  if [ -z "$expected" ] && [ -n "$SURSUMAI_SHA256_URL" ]; then
+    # SHA256SUMS is "<sha>  <filename>" lines; take the one for our asset
+    expected="$(curl -fsSL "$SURSUMAI_SHA256_URL" 2>/dev/null       | grep -F " $SURSUMAI_ASSET" | head -1 | cut -d" " -f1 || true)"
+  fi
+  if [ -z "$expected" ]; then
+    warn "no published checksum for $SURSUMAI_VERSION — cannot verify the download."
+    echo "  Continuing, but pass SURSUMAI_SHA256=<sha> to verify it yourself."
+    return 0
+  fi
+
+  actual="$(sha256_of "$file")"
+  if [ -z "$actual" ]; then
+    warn "neither sha256sum nor shasum found — skipping verification."
+    return 0
+  fi
+  if [ "$actual" != "$expected" ]; then
+    fail "checksum mismatch for $SURSUMAI_VERSION.
+    expected $expected
+    got      $actual
+  The download was corrupted or tampered with — nothing was installed."
+  fi
+  ok "Checksum verified ($SURSUMAI_VERSION)."
+}
 
 # --- code (tarball, no git) ----------------------------------------------------
 mkdir -p "$SURSUMAI_DIR"

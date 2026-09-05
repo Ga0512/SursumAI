@@ -20,6 +20,7 @@ class Spec:
     max_tokens: int = 2048
     temperature: float = 0.0
     hf_token: str = ""
+    api_key: str = ""  # bearer required by the deploy's own endpoint
     port: int | None = None  # 9000-9099; None = auto (hash do deploy_id)
 
     def validate(self) -> None:
@@ -41,6 +42,8 @@ class Spec:
             raise SpecError("max_tokens must be >= 1")
         if not 0 <= self.temperature <= 2:
             raise SpecError("temperature must be between 0 and 2")
+        if self.api_key and not isinstance(self.api_key, str):
+            raise SpecError("api_key must be a string")
         if self.port is not None:
             if not 9000 <= self.port <= 9099:
                 raise SpecError("port must be between 9000 and 9099")
@@ -57,6 +60,7 @@ class Spec:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "hf_token": self.hf_token,
+            "api_key": self.api_key,
             "port": self.port,
         }
 

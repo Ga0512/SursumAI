@@ -34,5 +34,17 @@ def new_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def hash_token(token: str) -> str:
+    """Sessions are stored hashed: a stolen database must not hand out
+    working bearer tokens. Tokens are already 256 bits of entropy, so a
+    single SHA-256 (no salt/stretching) is enough and keeps lookups indexable."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def new_deploy_key() -> str:
+    """Bearer key for a single deployment's own OpenAI-compatible endpoint."""
+    return "sk-sursum-" + secrets.token_urlsafe(24)
+
+
 def session_expiry() -> float:
     return time.time() + SESSION_TTL_SECONDS
