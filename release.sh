@@ -77,10 +77,25 @@ git archive --format=tar.gz --prefix="sursumai-$VERSION/" \
   -o "$BUILD/$ASSET" HEAD
 ok "built $ASSET ($(du -h "$BUILD/$ASSET" | cut -f1))"
 
-# a tarball that cannot start the app is worse than no release
-tar -tzf "$BUILD/$ASSET" | grep -q "sursumai-$VERSION/start.sh" \
-  || fail "the tarball has no start.sh"
-ok "tarball contains the app"
+# A tarball that cannot start the app is worse than no release.
+# The manifest goes to a file first: `tar | grep -q` looks right but grep exits
+# on the first match, tar dies of SIGPIPE, and pipefail turns that into a
+# failure on a perfectly good archive.
+tar -tzf "$BUILD/$ASSET" > "$BUILD/manifest.txt"
+for required in start.sh setup.sh install.sh requirements.txt VERSION \
+                central/app.py agent/app.py web/index.html sursumai/bin/sursumai; do
+  grep -qx "sursumai-$VERSION/$required" "$BUILD/manifest.txt" \
+    || fail "the tarball is missing $required"
+done
+ok "tarball contains the app ($(wc -l < "$BUILD/manifest.txt") files)"
+
+# the venv, the database and the logs must never ship
+for forbidden in ".venv/" "sursumai.db" "sursumai-logs/" "llama-models/" ".env"; do
+  if grep -q "$forbidden" "$BUILD/manifest.txt"; then
+    fail "the tarball contains $forbidden - it must ship only committed source"
+  fi
+done
+ok "tarball has no local state"
 
 ( cd "$BUILD" && sha256sum "$ASSET" > SHA256SUMS )
 ok "SHA256SUMS: $(cut -d' ' -f1 < "$BUILD/SHA256SUMS")"
