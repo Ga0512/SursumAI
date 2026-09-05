@@ -32,6 +32,8 @@ def capture(monkeypatch):
     sent = {}
 
     class _FakeResponse:
+        status = 200
+
         def read(self):
             return b"{}"
 
@@ -118,6 +120,7 @@ def test_status_shape(client, capture, monkeypatch):
     monkeypatch.setattr(agent_app.executor_llama, "is_running", lambda did: True)
     monkeypatch.setattr(agent_app.executor_llama, "stage", lambda did: "starting")
     monkeypatch.setattr(agent_app, "_probe_healthy", lambda ep, key=None: True)
+    monkeypatch.setattr(agent_app, "_auth_enforced", lambda ep, key: True)
 
     agent_client.status(DEPLOY_ID)
     assert capture["method"] == "GET"
@@ -176,16 +179,48 @@ def test_agent_errors_reach_the_central_as_agent_error(monkeypatch):
         agent_client.status(DEPLOY_ID)
 
 
-# ---- the runtime command line carries the deploy key ----
+# ---- the runtime receives the deploy key, without it reaching argv ----
 
-def test_vllm_command_passes_the_api_key():
+def test_vllm_receives_the_key_through_the_environment():
     from agent import executor
-    cmd = executor.build_cmd(Spec.from_dict(SPEC), DEPLOY_ID)
-    assert "--api-key" in cmd and "sk-sursum-test" in cmd
+    spec = Spec.from_dict(SPEC)
+    cmd = executor.build_cmd(spec, DEPLOY_ID)
+    assert "sk-sursum-test" not in " ".join(cmd)
+    assert executor.runtime_env(spec)["VLLM_API_KEY"] == "sk-sursum-test"
 
 
-def test_llama_command_passes_the_api_key():
+def test_llama_reads_its_key_from_a_file_not_from_argv():
     from agent import executor_llama
-    paths = {"gguf": "/models/m.gguf"}
-    cmd = executor_llama._binary_build_cmd(Spec.from_dict(SPEC), DEPLOY_ID, paths, "llama-server")
-    assert "--api-key" in cmd and "sk-sursum-test" in cmd
+    spec = Spec.from_dict(SPEC)
+    for cmd in (
+        executor_llama._binary_build_cmd(spec, DEPLOY_ID, {"gguf": "/models/m.gguf"},
+                                         "llama-server"),
+        executor_llama._docker_build_cmd(spec, DEPLOY_ID, {"gguf": "/models/m.gguf"}),
+    ):
+        assert "sk-sursum-test" not in " ".join(cmd)
+        assert "--api-key-file" in cmd
+    executor_llama.stop(DEPLOY_ID)
+
+
+def test_the_agent_reports_whether_auth_is_really_enforced(client, monkeypatch):
+    """Trusting the flag is not enough: a runtime that ignored its key file
+    would still answer the authenticated probe, and look perfectly healthy."""
+    monkeypatch.setattr(agent_app.executor, "is_running", lambda did: True)
+    monkeypatch.setattr(agent_app.executor_llama, "is_running", lambda did: False)
+    monkeypatch.setattr(agent_app.executor, "stage", lambda did: "running")
+    monkeypatch.setattr(agent_app, "_probe_healthy", lambda ep, key=None: True)
+    agent_app.SPECS[DEPLOY_ID] = Spec.from_dict(SPEC)
+
+    # the endpoint answers an unauthenticated caller: the key is not applied
+    monkeypatch.setattr(agent_app, "_probe", lambda ep, api_key=None: 200)
+    body = client.get(f"/deploys/{DEPLOY_ID}/status",
+                      headers={"X-Agent-Key": "test-agent-key"}).json()
+    assert body["auth_enforced"] is False
+
+    # the endpoint refuses it: the key is doing its job
+    monkeypatch.setattr(agent_app, "_probe", lambda ep, api_key=None: 401)
+    body = client.get(f"/deploys/{DEPLOY_ID}/status",
+                      headers={"X-Agent-Key": "test-agent-key"}).json()
+    assert body["auth_enforced"] is True
+
+    agent_app.SPECS.pop(DEPLOY_ID, None)

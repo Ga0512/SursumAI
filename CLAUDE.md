@@ -110,7 +110,8 @@ Email + senha com PBKDF2 (`central/auth.py`), sessões com token bearer via `HTT
 Três segredos, três donos:
 
 - **`AGENT_KEY`** (`core/keys.py`) protege o agent. Gerada aleatória no 1º run em `~/.sursumai/agent.key` (0600); `AGENT_KEY` no ambiente ganha. Comparação sempre por `hmac.compare_digest`. O agent recusa subir com a chave de dev fora de loopback, e a checagem é um **middleware** — como dependência ela rodava depois da validação do corpo, devolvendo 422 antes de 401.
-- **`Spec.api_key`** protege cada deploy: gerada em `POST /deploys`, passada como `--api-key` ao vLLM/llama-server. Toda chamada ao endpoint do deploy (playground, router, judge, health probe, métricas) manda esse bearer; os specs ficam em `~/.sursumai/specs/` (0600) para sobreviver a um restart do agent.
+- **`Spec.api_key`** protege cada deploy: gerada em `POST /deploys`. Toda chamada ao endpoint do deploy (playground, router, judge, health probe, métricas) manda esse bearer; os specs ficam em `~/.sursumai/specs/` (0600) para sobreviver a um restart do agent. **Nunca colocar a chave em argv** — `" ".join(cmd)` vai para o log do deploy, que o README manda o usuário abrir quando algo falha, e argv é legível em `/proc/<PID>/cmdline`. llama-server lê de `--api-key-file` (arquivo 0600 em `~/.sursumai/deploys/`, montado read-only no container); vLLM não tem essa opção e recebe por `-e VLLM_API_KEY` (flag `-e` sem valor: o docker herda do processo chamador). O `-e`/`-v` tem que vir **antes** da imagem — depois dela tudo é argumento do servidor do modelo.
+- **`auth_enforced`** no status do agent: depois de saudável, o agent faz uma sonda *sem* a chave e confirma que leva 401/403. Se um runtime ignorasse a chave, ele subiria aberto e a sonda autenticada passaria igual — controle de segurança que falha em silêncio é pior que nenhum. O central loga `error` se isso acontecer.
 - **Token de sessão** protege a API do central, como acima.
 
 ### Bind

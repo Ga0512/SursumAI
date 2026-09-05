@@ -557,9 +557,53 @@ function fmtTokens(n) {
 }
 
 async function copyUrl(url) {
-  if (!url) { toast("No endpoint yet"); return; }
+  if (!url || url === "…") { toast("No endpoint yet"); return; }
   try { await navigator.clipboard.writeText(url); toast("Copied!"); }
   catch { toast(url); }
+}
+
+/* ---- the deployment's API key ----
+   Held in memory only, shown masked: the modal is the sort of thing people
+   leave open while screen-sharing. */
+let detailKey = "";
+let detailKeyVisible = false;
+
+function maskKey(key) {
+  // keep the prefix so it is recognisable, and the tail so it can be matched
+  // against a key someone already has, without showing the secret itself
+  if (key.length <= 14) return "•".repeat(key.length);
+  return key.slice(0, 10) + "•".repeat(12) + key.slice(-4);
+}
+
+function setDetailKey(key) {
+  detailKey = key;
+  detailKeyVisible = false;
+  renderDetailKey();
+}
+
+function renderDetailKey() {
+  const el = document.getElementById("detailKey");
+  const btn = document.getElementById("detailKeyReveal");
+  if (!el) return;
+  if (!detailKey) {
+    el.textContent = "— (redeploy to get one)";
+    if (btn) btn.style.display = "none";
+    return;
+  }
+  if (btn) btn.style.display = "";
+  el.textContent = detailKeyVisible ? detailKey : maskKey(detailKey);
+  if (btn) btn.textContent = detailKeyVisible ? "Hide" : "Show";
+}
+
+function toggleKey() {
+  detailKeyVisible = !detailKeyVisible;
+  renderDetailKey();
+}
+
+async function copyKey() {
+  if (!detailKey) { toast("This deployment has no API key — redeploy it"); return; }
+  try { await navigator.clipboard.writeText(detailKey); toast("API key copied!"); }
+  catch { toast("Could not copy — use Show and select it"); }
 }
 
 async function destroy(id) {
@@ -690,6 +734,7 @@ function openDetail(id) {
 function closeDetail() {
   if (detailTimer) { clearInterval(detailTimer); detailTimer = null; }
   detailId = null;
+  setDetailKey("");  // never leave one deployment's key on screen for the next
   document.getElementById("detailModal").classList.add("hidden");
 }
 
@@ -720,6 +765,7 @@ function renderDetailMetrics(d) {
   st.className = `status ${d.status}`;
   st.innerHTML = `<span class="dot"></span>${STATUS_LABEL[d.status] || d.status}`;
   document.getElementById("detailUrl").textContent = d.endpoint || "…";
+  setDetailKey(d.spec.api_key || "");
 
   const m = d.metrics;
   if (!m || d.status !== "healthy") {

@@ -610,7 +610,11 @@ body {
 .tab-pane.active { display: block; }
 
 .kv-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
-.kv-row .url { flex: 1; }
+.kv-row .url { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.kv-label { color: #7d879c; font-size: 0.78rem; flex-shrink: 0; }
+/* the key is monospace so the masked and revealed forms do not jump around */
+#detailKey { font-variant-ligatures: none; letter-spacing: 0.02em; }
+.btn-sm { padding: 4px 10px; font-size: 0.75rem; flex-shrink: 0; }
 
 /* --- playground --- */
 .play-area { display: flex; flex-direction: column; gap: 12px; }

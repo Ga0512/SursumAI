@@ -18,6 +18,7 @@ from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.errors import RepositoryNotFoundError
 
 from core import ports
+from core import keys
 from core.spec import Spec
 
 # Runtime strategy: NVIDIA GPU -> docker image (CUDA); otherwise -> native binary
@@ -26,6 +27,7 @@ from core.spec import Spec
 # get CUDA without compiling from source; on machines without an NVIDIA GPU the
 # tiny native binary is faster to bring up than a multi-GB docker image.
 IMAGE = "ghcr.io/ggml-org/llama.cpp:server"
+CONTAINER_KEY = "/run/sursumai/api.key"  # where the key file is mounted
 LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "llama-models"
 BIN_DIR = Path(__file__).resolve().parent.parent / "llama-bin"
@@ -153,9 +155,10 @@ def _image_present() -> bool:
         return False
 
 
-def _stream_logs(log_path: Path, cmd: list[str]) -> None:
+def _stream_logs(log_path: Path, cmd: list[str],
+                 env: dict[str, str] | None = None) -> None:
     with open(log_path, "ab") as f:
-        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT)
+        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
 
 
 def _follow_logs(deploy_id: str) -> None:
@@ -317,6 +320,35 @@ def _ensure_binary() -> str:
         raise TransportError(f"llama-server not found after extracting {asset}")
     os.chmod(exe, 0o755)
     return str(exe)
+
+
+def _key_file(deploy_id: str) -> Path:
+    """Where this deploy's API key lives while it is running.
+
+    llama-server reads it with --api-key-file, so the secret never appears in
+    a command line (readable by any local user via /proc) nor in the deploy log
+    (which users are told to open, and paste, when something fails).
+    """
+    return keys.KEY_DIR / "deploys" / f"{deploy_id}.key"
+
+
+def _write_key_file(deploy_id: str, api_key: str) -> str:
+    path = _key_file(deploy_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        # one key per line; the server ignores lines starting with '#'
+        os.write(fd, (api_key + "\n").encode())
+    finally:
+        os.close(fd)
+    return str(path)
+
+
+def _remove_key_file(deploy_id: str) -> None:
+    try:
+        _key_file(deploy_id).unlink()
+    except OSError:
+        pass
 
 
 def _pid_file(deploy_id: str) -> Path:
@@ -544,6 +576,9 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
     ]
     if spec.gpus and _gpu_available():
         cmd += ["--runtime", "nvidia", "--gpus", "all"]
+    # the key is mounted as a read-only file; only its path reaches argv
+    if spec.api_key:
+        cmd += ["-v", f"{_write_key_file(deploy_id, spec.api_key)}:{CONTAINER_KEY}:ro"]
     cmd += [
         IMAGE,
         "--model", f"/models/{Path(paths['gguf']).name}",
@@ -556,7 +591,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "--cache-reuse", "1",
     ]
     if spec.api_key:
-        cmd += ["--api-key", spec.api_key]
+        cmd += ["--api-key-file", CONTAINER_KEY]
     if paths.get("mmproj"):
         cmd += ["--mmproj", f"/models/{Path(paths['mmproj']).name}"]
     return cmd
@@ -577,15 +612,20 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
     ]
     if _runtime_strategy() in ("vulkan", "cuda"):
         cmd += ["-ngl", "999"]
+    # only the path reaches argv; the key itself stays in a 0600 file
     if spec.api_key:
-        cmd += ["--api-key", spec.api_key]
+        cmd += ["--api-key-file", _write_key_file(deploy_id, spec.api_key)]
     if paths.get("mmproj"):
         cmd += ["--mmproj", paths["mmproj"]]
     return cmd
 
 
-def _binary_env(exe: str) -> dict[str, str]:
-    """Make sure llama.cpp finds its bundled shared libs (Linux)."""
+def _binary_env(exe: str, spec: Spec | None = None) -> dict[str, str]:
+    """Make sure llama.cpp finds its bundled shared libs (Linux).
+
+    The API key is NOT here: it goes through --api-key-file, so it is not in
+    this process's environment either.
+    """
     env = dict(os.environ)
     lib_dir = Path(exe).resolve().parent
     if lib_dir.exists():
@@ -630,7 +670,7 @@ def start(spec: Spec, deploy_id: str) -> str:
             cmd,
             stdout=open(log_path, "ab"),
             stderr=subprocess.STDOUT,
-            env=_binary_env(exe),
+            env=_binary_env(exe, spec),
             start_new_session=True,
         )
         _pid_file(deploy_id).write_text(str(proc.pid))
@@ -682,6 +722,7 @@ def _friendly_stage(marker: str) -> str:
 
 
 def stop(deploy_id: str) -> None:
+    _remove_key_file(deploy_id)
     _binary_stop(deploy_id)
     _docker_stop(deploy_id)
 

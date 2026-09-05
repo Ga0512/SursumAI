@@ -324,6 +324,13 @@
         <div class="kv-row">
           <span class="status" id="detailStatus"><span class="dot"></span>—</span>
           <code class="url" id="detailUrl">—</code>
+          <button class="btn btn-ghost btn-sm" onclick="copyUrl(document.getElementById('detailUrl').textContent)">Copy</button>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">API key</span>
+          <code class="url" id="detailKey">—</code>
+          <button class="btn btn-ghost btn-sm" id="detailKeyReveal" onclick="toggleKey()">Show</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyKey()">Copy</button>
         </div>
         <div class="metrics-grid" id="detailMetricsGrid"></div>
         <div class="spark-row">

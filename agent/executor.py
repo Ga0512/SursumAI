@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -50,8 +51,12 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--ipc", "host",
         "-p", f"{port}:8000",
     ]
+    # `-e NAME` with no value: docker forwards it from our environment, so the
+    # secret never lands in an argument list (see runtime_env)
     if spec.hf_token:
-        cmd += ["-e", f"HF_TOKEN={spec.hf_token}"]
+        cmd += ["-e", "HF_TOKEN"]
+    if spec.api_key:
+        cmd += ["-e", "VLLM_API_KEY"]
     cmd += [
         IMAGE,
         spec.model,
@@ -60,9 +65,18 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--tensor-parallel-size", str(spec.gpus),
         "--enable-prefix-caching",
     ]
-    if spec.api_key:
-        cmd += ["--api-key", spec.api_key]
     return cmd
+
+
+def runtime_env(spec: Spec) -> dict[str, str]:
+    """Environment for the docker client: carries the secrets the container
+    inherits through the bare `-e NAME` flags in build_cmd."""
+    env = dict(os.environ)
+    if spec.hf_token:
+        env["HF_TOKEN"] = spec.hf_token
+    if spec.api_key:
+        env["VLLM_API_KEY"] = spec.api_key
+    return env
 
 
 def _docker_info() -> None:
@@ -76,9 +90,10 @@ def _docker_info() -> None:
         raise TransportError("Docker is not running or not installed")
 
 
-def _stream_logs(log_path: Path, cmd: list[str]) -> None:
+def _stream_logs(log_path: Path, cmd: list[str],
+                 env: dict[str, str] | None = None) -> None:
     with open(log_path, "ab") as f:
-        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT)
+        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
 
 
 def _follow_logs(deploy_id: str) -> None:
@@ -191,7 +206,7 @@ def start(spec: Spec, deploy_id: str) -> str:
 
     cmd = build_cmd(spec, deploy_id)
     _log(deploy_id, ">>> " + " ".join(cmd))
-    _stream_logs(log_path, cmd)
+    _stream_logs(log_path, cmd, env=runtime_env(spec))
 
     _log(deploy_id, "=== container started, following container logs ===")
     _follow_logs(deploy_id)

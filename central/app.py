@@ -199,6 +199,14 @@ async def _deploy_job(deploy_id: str) -> None:
             try:
                 st = await asyncio.to_thread(agent_client.status, deploy_id)
                 deploy.endpoint = st.get("endpoint")
+                if st.get("auth_enforced") is False:
+                    # the runtime came up ignoring its key file: the endpoint is
+                    # reachable by anyone who finds the port
+                    log.error(
+                        "deploy %s is serving WITHOUT authentication — the runtime "
+                        "did not apply its API key. Endpoint %s is open to anything "
+                        "that can reach the port.", deploy_id, deploy.endpoint,
+                    )
             except agent_client.AgentError:
                 deploy.endpoint = None
         else:

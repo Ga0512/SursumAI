@@ -7,6 +7,8 @@ a multi-gigabyte download or a server that silently never comes up.
 
 import hashlib
 import json
+import os
+import stat
 
 import pytest
 
@@ -327,15 +329,75 @@ def test_container_names_are_derived_from_the_deploy_id():
     assert ex._docker_name("deadbeefcafe1234") == "deploy-deadbeefcafe"
 
 
-def test_the_api_key_reaches_both_runtimes(paths):
+def test_the_key_never_appears_in_a_command_line(paths):
+    """A secret in argv is readable by any local user through
+    /proc/<PID>/cmdline, and this command is also written into the deploy log
+    that users are told to open when something fails."""
     spec = _spec(api_key="sk-sursum-secret")
     for cmd in (ex._binary_build_cmd(spec, "id", paths, "llama-server"),
                 ex._docker_build_cmd(spec, "id", paths)):
-        assert cmd[cmd.index("--api-key") + 1] == "sk-sursum-secret"
+        assert "sk-sursum-secret" not in " ".join(cmd)
+        assert "--api-key" not in cmd
 
 
-def test_no_api_key_means_no_flag(paths):
-    assert "--api-key" not in ex._binary_build_cmd(_spec(), "id", paths, "llama-server")
+def test_the_key_file_holds_the_key_and_nothing_else(paths):
+    ex._binary_build_cmd(_spec(api_key="sk-sursum-secret"), "kf1", paths, "llama-server")
+    path = ex._key_file("kf1")
+    # one key per line, which is the format llama-server documents
+    assert path.read_text() == "sk-sursum-secret\n"
+    ex._remove_key_file("kf1")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="file modes are POSIX-only")
+def test_the_key_file_is_readable_only_by_its_owner(paths):
+    ex._binary_build_cmd(_spec(api_key="sk-sursum-secret"), "kf2", paths, "llama-server")
+    path = ex._key_file("kf2")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    ex._remove_key_file("kf2")
+
+
+def test_the_binary_is_told_where_the_key_file_is(paths):
+    cmd = ex._binary_build_cmd(_spec(api_key="sk-sursum-secret"), "kf3", paths, "llama-server")
+    assert cmd[cmd.index("--api-key-file") + 1] == str(ex._key_file("kf3"))
+    ex._remove_key_file("kf3")
+
+
+def test_the_container_mounts_the_key_file_read_only(paths):
+    cmd = ex._docker_build_cmd(_spec(api_key="sk-sursum-secret"), "kf4", paths)
+    assert f"{ex._key_file('kf4')}:{ex.CONTAINER_KEY}:ro" in cmd
+    assert cmd[cmd.index("--api-key-file") + 1] == ex.CONTAINER_KEY
+    ex._remove_key_file("kf4")
+
+
+def test_mounts_come_before_the_image(paths):
+    """Everything after the image name is an argument to llama-server, not to
+    docker -- a `-v` there would be handed to the model server and rejected."""
+    cmd = ex._docker_build_cmd(_spec(api_key="sk-sursum-secret"), "kf5", paths)
+    image_at = cmd.index(ex.IMAGE)
+    assert "-v" not in cmd[image_at:]
+    ex._remove_key_file("kf5")
+
+
+def test_stopping_a_deploy_removes_its_key_file(paths, monkeypatch):
+    monkeypatch.setattr(ex, "_docker_stop", lambda did: None)
+    monkeypatch.setattr(ex, "_binary_stop", lambda did: None)
+    ex._binary_build_cmd(_spec(api_key="sk-sursum-secret"), "kf6", paths, "llama-server")
+    assert ex._key_file("kf6").exists()
+    ex.stop("kf6")
+    assert not ex._key_file("kf6").exists()
+
+
+def test_no_api_key_means_no_file_and_no_flag(paths):
+    spec = _spec()
+    assert "--api-key-file" not in ex._binary_build_cmd(spec, "kf7", paths, "llama-server")
+    assert "--api-key-file" not in ex._docker_build_cmd(spec, "kf7", paths)
+    assert not ex._key_file("kf7").exists()
+
+
+def test_the_key_never_reaches_the_process_environment(paths):
+    """--api-key-file means the secret is not in argv AND not in the env."""
+    env = ex._binary_env("llama-server", _spec(api_key="sk-sursum-secret"))
+    assert not any("sk-sursum-secret" in v for v in env.values())
 
 
 # ---- logs ----
@@ -350,3 +412,20 @@ def test_logs_returns_the_tail(monkeypatch, tmp_path):
     (tmp_path / "abc.log").write_text("\n".join(f"line {i}" for i in range(100)))
     out = ex.logs("abc", tail=5)
     assert out.strip().splitlines() == [f"line {i}" for i in range(95, 100)]
+
+
+def test_the_vllm_container_also_keeps_its_secrets_out_of_argv():
+    from agent import executor
+
+    spec = Spec(model="org/m", api_key="sk-sursum-secret", hf_token="hf_secret")
+    cmd = executor.build_cmd(spec, "id")
+    joined = " ".join(cmd)
+    assert "sk-sursum-secret" not in joined
+    assert "hf_secret" not in joined
+
+    image_at = cmd.index(executor.IMAGE)
+    assert "-e" not in cmd[image_at:]
+
+    env = executor.runtime_env(spec)
+    assert env["VLLM_API_KEY"] == "sk-sursum-secret"
+    assert env["HF_TOKEN"] == "hf_secret"

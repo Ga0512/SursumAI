@@ -36,8 +36,11 @@
 - A checagem de chave do agent é um **middleware** (`_agent_key_gate`), não só a
   dependência `_require_key`: o FastAPI valida o corpo antes das dependências, e
   sem o middleware um chamador não autenticado recebia 422 em vez de 401.
-- **Uma API key por deploy** (`Spec.api_key`, gerada em `POST /deploys`),
-  passada como `--api-key` para vLLM e llama-server. Toda chamada ao endpoint do
+- **Uma API key por deploy** (`Spec.api_key`, gerada em `POST /deploys`).
+  **Nunca em argv**: o comando vai para o log do deploy e argv é legível em
+  `/proc`. llama-server usa `--api-key-file` (0600, montado read-only no
+  container); vLLM usa `-e VLLM_API_KEY`. O agent ainda confirma via
+  `auth_enforced` que o endpoint recusa chamada sem chave. Toda chamada ao endpoint do
   deploy — playground, router, judge, health probe, scrape de métricas — manda
   esse bearer. Os specs são persistidos em `~/.sursumai/specs/` (0600) para
   sobreviverem a um restart do agent, senão as probes perdem a chave.

@@ -87,15 +87,38 @@ def _require_key(x_agent_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid agent key")
 
 
-def _probe_healthy(endpoint: str, api_key: str | None = None) -> bool:
+def _probe(endpoint: str, api_key: str | None = None) -> int | None:
+    """HTTP status of GET {endpoint}/models, or None if unreachable."""
     req = urllib.request.Request(f"{endpoint}/models")
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status == 200
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
     except (urllib.error.URLError, OSError):
-        return False
+        return None
+
+
+def _probe_healthy(endpoint: str, api_key: str | None = None) -> bool:
+    return _probe(endpoint, api_key) == 200
+
+
+def _auth_enforced(endpoint: str, api_key: str | None) -> bool:
+    """Is the deploy actually refusing unauthenticated callers?
+
+    Asking the server instead of trusting the flag: if a runtime ever ignores
+    --api-key-file, it starts wide open and the authenticated probe still
+    passes, so the endpoint would look healthy while being unprotected. A
+    security control that silently fails to apply is worse than none.
+    """
+    if not api_key:
+        return True  # nothing to enforce
+    status = _probe(endpoint, api_key=None)
+    if status is None:
+        return True  # unreachable: the health probe reports that separately
+    return status in (401, 403)
 
 
 @app.get("/health")
@@ -319,11 +342,13 @@ async def deploy_status(deploy_id: str, x_agent_key: str | None = Header(None)):
     spec = _spec_for(deploy_id)
     running = executor.is_running(deploy_id) or executor_llama.is_running(deploy_id)
     ep = executor_llama.endpoint(deploy_id, spec)
-    healthy = _probe_healthy(ep, spec.api_key if spec else None) if running else False
+    key = spec.api_key if spec else None
+    healthy = _probe_healthy(ep, key) if running else False
     return {
         "deploy_id": deploy_id,
         "running": running,
         "healthy": healthy,
+        "auth_enforced": _auth_enforced(ep, key) if healthy else True,
         "endpoint": ep if running else None,
         "stage": executor_llama.stage(deploy_id) if running else executor.stage(deploy_id),
     }
