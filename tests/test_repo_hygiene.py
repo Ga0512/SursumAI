@@ -93,5 +93,34 @@ def test_the_release_script_builds_the_asset_the_installer_expects():
     assert version  # the script derives everything from VERSION
 
 
+@pytest.mark.parametrize("script", ["install.sh", "setup.sh"])
+def test_docker_is_never_probed_without_a_timeout(script):
+    """`docker info` blocks for minutes when the daemon is down (Docker Desktop
+    closed on WSL). These scripts are the first thing a new user runs, so an
+    unbounded probe is a silent hang at the worst possible moment."""
+    lines = (ROOT / script).read_text(encoding="utf-8").splitlines()
+    bare = [
+        line.strip() for line in lines
+        if "docker info" in line
+        and not line.strip().startswith("#")
+        and "run_with_timeout" not in line
+    ]
+    assert not bare, f"{script}: unbounded docker probe: {bare}"
+
+
+@pytest.mark.parametrize("script", ["install.sh", "setup.sh"])
+def test_the_scripts_define_the_timeout_helper(script):
+    text = (ROOT / script).read_text(encoding="utf-8")
+    assert "run_with_timeout()" in text
+    # macOS ships no timeout(1) - the fallback must exist
+    assert "watchdog" in text
+
+
+def test_dependency_install_is_not_silent():
+    """A --quiet pip install on WSL looks identical to a hang for minutes."""
+    setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+    assert ".venv/bin/python -m pip install -r requirements.txt" in setup
+
+
 def test_the_project_ships_a_license():
     assert (ROOT / "LICENSE").read_text(encoding="utf-8").strip()

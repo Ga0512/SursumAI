@@ -18,22 +18,50 @@ if [ -z "$PYBIN" ]; then
   exit 1
 fi
 
+# `docker info` blocks for a long time when Docker is installed but the daemon
+# is not running - very common on WSL with Docker Desktop closed. This script is
+# often the first thing a new user runs, and a silent hang is the worst possible
+# first impression, so every probe is bounded. macOS ships no timeout(1), hence
+# the fallback.
+run_with_timeout() {
+  local secs="$1"; shift
+  local rc=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@" || rc=$?
+    return "$rc"
+  fi
+  "$@" &
+  local pid=$!
+  ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) &
+  local watchdog=$!
+  wait "$pid" 2>/dev/null || rc=$?
+  kill "$watchdog" 2>/dev/null || true
+  return "$rc"
+}
+
+docker_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  run_with_timeout 10 docker info >/dev/null 2>&1
+}
+
 if [ ! -d ".venv" ]; then
   echo "Creating virtual environment…"
   "$PYBIN" -m venv .venv
 fi
 
-echo "Installing dependencies…"
+echo "Installing dependencies… (a few minutes on the first run)"
 .venv/bin/python -m pip install --quiet --upgrade pip
-.venv/bin/python -m pip install --quiet -r requirements.txt
+# deliberately NOT --quiet: on WSL this takes minutes, and silence looks
+# exactly like a hang - which is the moment people give up
+.venv/bin/python -m pip install -r requirements.txt
 
 echo
 echo "Checking Docker (used for NVIDIA GPU inference)…"
 if command -v docker >/dev/null 2>&1; then
-  if docker info >/dev/null 2>&1; then
+  if docker_running; then
     echo "✓ Docker is running."
   else
-    echo "! Docker is installed but NOT running."
+    echo "! Docker is installed but NOT responding."
     echo "  Start it (Docker Desktop) and try again, or keep going —"
     echo "  without Docker we can still run models via the native llama.cpp binary."
   fi

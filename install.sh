@@ -72,6 +72,32 @@ esac
 command -v curl >/dev/null 2>&1 || fail "curl not found. Install curl first."
 command -v tar  >/dev/null 2>&1 || fail "tar not found."
 
+# `docker info` blocks for a long time when Docker is installed but the daemon
+# is not running - very common on WSL with Docker Desktop closed. This script is
+# often the first thing a new user runs, and a silent hang is the worst possible
+# first impression, so every probe is bounded. macOS ships no timeout(1), hence
+# the fallback.
+run_with_timeout() {
+  local secs="$1"; shift
+  local rc=0
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@" || rc=$?
+    return "$rc"
+  fi
+  "$@" &
+  local pid=$!
+  ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) &
+  local watchdog=$!
+  wait "$pid" 2>/dev/null || rc=$?
+  kill "$watchdog" 2>/dev/null || true
+  return "$rc"
+}
+
+docker_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  run_with_timeout 10 docker info >/dev/null 2>&1
+}
+
 # --- integrity -----------------------------------------------------------------
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -176,9 +202,9 @@ ok "Environment ready."
 # Docker unlocks the GPU (vLLM and llama.cpp with CUDA). Without it, SursumAI
 # still works on CPU. We ask and install automatically when possible.
 ensure_docker() {
-  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && return 0
-  if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
-    warn "Docker is installed but the daemon is not running."
+  docker_running && return 0
+  if command -v docker >/dev/null 2>&1; then
+    warn "Docker is installed but the daemon is not responding."
     echo "  Open Docker Desktop and run the installer again — or keep going on CPU for now."
     return 1
   fi
@@ -197,7 +223,7 @@ ensure_docker() {
     echo "Installing docker.io via apt (requires sudo)…"
     sudo apt-get update -qq && sudo apt-get install -y -qq docker.io \
       || fail "could not install Docker via apt. Install it manually: https://docs.docker.com/engine/install/"
-    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 \
+    docker_running \
       && ok "Docker installed and running." \
       || { warn "Docker installed. Start the daemon (sudo systemctl start docker) and run the installer again."; return 1; }
   elif [ "$IS_MAC" -eq 1 ]; then
