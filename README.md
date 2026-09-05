@@ -45,7 +45,7 @@ use.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.7.0/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.7.1/install.sh | bash
 ```
 
 The installer downloads a **released tag** (never a moving branch) and checks

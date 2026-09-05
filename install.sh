@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.7.0}"
+SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.7.1}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
 RELEASE_BASE="https://github.com/$SURSUMAI_REPO/releases/download/$SURSUMAI_VERSION"
