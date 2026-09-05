@@ -166,11 +166,23 @@ def test_the_executors_fall_back_to_the_legacy_port_without_a_spec():
 
 # ---- releasing a port takes a moment ----
 
+def _a_free_port() -> int:
+    """A port that is genuinely free right now.
+
+    Never hardcode one from the deploy range: on a machine that is actually
+    running SursumAI those are in use, and the test would fail for a reason
+    that has nothing to do with the code.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
 def test_wait_until_free_returns_at_once_for_a_free_port():
     import time as _time
 
     start = _time.monotonic()
-    assert ports.wait_until_free(ports.PORT_MIN, timeout=5) is True
+    assert ports.wait_until_free(_a_free_port(), timeout=5) is True
     assert _time.monotonic() - start < 1
 
 
