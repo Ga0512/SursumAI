@@ -111,10 +111,9 @@ git tag -a "$TAG" -m "SursumAI $VERSION"
 git push origin "$TAG"
 ok "tag $TAG pushed"
 
-gh release create "$TAG" \
-  "$BUILD/$ASSET" "$BUILD/SHA256SUMS" \
-  --title "SursumAI $VERSION" \
-  --notes-file <(cat <<EOF
+# process substitution is a bashism git-bash on Windows cannot open
+# (/proc/<pid>/fd/63) - a real file works on every platform.
+cat > "$BUILD/NOTES.md" <<EOF
 Install:
 
 \`\`\`bash
@@ -124,7 +123,11 @@ curl -fsSL https://github.com/Ga0512/SursumAI/raw/$TAG/install.sh | bash
 The installer downloads \`$ASSET\` from this release and verifies it against
 \`SHA256SUMS\` before installing anything.
 EOF
-)
+
+gh release create "$TAG" \
+  "$BUILD/$ASSET" "$BUILD/SHA256SUMS" \
+  --title "SursumAI $VERSION" \
+  --notes-file "$BUILD/NOTES.md"
 ok "release $TAG published"
 echo
 echo "Install command:"
