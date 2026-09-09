@@ -139,7 +139,7 @@ function toast(msg) {
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/main/install.sh | bash";
+const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.0/install.sh | bash";
 
 function copyInstall() {
   const btn = document.querySelector(".install-copy");
@@ -474,7 +474,7 @@ function cardHTML(d) {
   const status = d.status;
   const meta = `${d.spec.runtime || "vllm"} · ${d.spec.target} · ${d.spec.gpus} GPU${d.spec.gpus > 1 ? "s" : ""} · TP-${d.spec.gpus}`;
   const url = d.endpoint || "…";
-  const err = d.error ? `<div class="meta" style="color:#f43f5e">${d.error}</div>` : "";
+  const err = d.error ? `<div class="meta" style="color:var(--red)">${d.error}</div>` : "";
   const stageLabel = deployStageLabel(d);
   const stage = stageLabel ? `<div class="meta">${stageLabel}</div>` : "";
   const checks = d.preflight && d.preflight.length ? `
@@ -519,7 +519,7 @@ function cardHTML(d) {
         <button class="btn" onclick="openDetail('${d.id}')">Details</button>
         <button class="btn" onclick="openLogs('${d.id}')">Logs</button>
         <button class="btn" onclick="openRedeploy('${d.id}')">Redeploy</button>
-        <button class="btn" onclick="destroy('${d.id}')">Destroy</button>
+        <button class="btn btn-danger" onclick="destroy('${d.id}')">Destroy</button>
       </div>
     </div>`;
 }
@@ -539,12 +539,12 @@ function sparkSVG(series) {
     <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <defs>
         <linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#4f7cff" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="#4f7cff" stop-opacity="0"/>
+          <stop offset="0%" stop-color="#635bff" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#635bff" stop-opacity="0"/>
         </linearGradient>
       </defs>
       <polygon points="${area}" fill="url(#sparkfill)"/>
-      <polyline points="${pts}" fill="none" stroke="#4f7cff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <polyline points="${pts}" fill="none" stroke="#635bff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     </svg>
     <span class="spark-last">${last}/s</span>`;
 }
@@ -1128,9 +1128,24 @@ function switchDash(view) {
   document.getElementById("poolsView").classList.toggle("hidden", view !== "pools");
   document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
   document.getElementById("keysView").classList.toggle("hidden", view !== "keys");
+  syncDashActions(view);
   if (view === "chat") loadChat();
   if (view === "pools") loadPoolsView();
   if (view === "keys") loadApiKeys();
+}
+
+/* The header action belongs to the tab you are on: "+ New" deploys a model,
+   "+ Pool" groups them. Neither means anything on Playground or API keys. */
+function dashView() {
+  const active = document.querySelector(".dash-tab.active");
+  return active ? active.dataset.view : "deploys";
+}
+
+function syncDashActions(view) {
+  view = view || dashView();
+  const poolable = !document.getElementById("poolBtn").dataset.blocked;
+  document.getElementById("newBtn").classList.toggle("hidden", view !== "deploys");
+  document.getElementById("poolBtn").classList.toggle("hidden", view !== "pools" || !poolable);
 }
 
 async function loadPoolsView() {
@@ -1195,7 +1210,10 @@ async function loadChat() {
   sel.innerHTML = (poolOpts ? `<optgroup label="Pools">${poolOpts}</optgroup>` : "") +
     `<optgroup label="Models">${modelOpts}</optgroup>`;
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
-  document.getElementById("poolBtn").classList.toggle("hidden", !healthy.length);
+  const poolBtn = document.getElementById("poolBtn");
+  if (healthy.length) delete poolBtn.dataset.blocked;
+  else poolBtn.dataset.blocked = "1";
+  syncDashActions();
   const hasTarget = !!sel.value;
   document.getElementById("chatInput").disabled = !hasTarget;
   document.getElementById("chatSend").disabled = !hasTarget;

@@ -13,7 +13,7 @@
   <!-- ======= LANDING / HERO ======= -->
   <section id="landing">
     <nav class="nav">
-      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><text x="30" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="42" fill="#ffffff">S</text><rect x="46" y="46" width="12" height="12" rx="3" fill="#2563eb"/></svg>SursumAI</span>
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><text x="30" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="42" fill="#ffffff">S</text><rect x="46" y="46" width="12" height="12" rx="3" fill="#635bff"/></svg>SursumAI</span>
       <div>
         <button class="btn btn-ghost" onclick="showView('login')">Sign in</button>
         <button class="btn btn-primary" onclick="showView('login')">Get started</button>
@@ -102,7 +102,7 @@
       <h2>Install in one command</h2>
       <p class="landing-sub">Runs on Linux, macOS and WSL (Windows). No Docker, Python or GPU knowledge needed.</p>
       <div class="install-box">
-        <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/main/install.sh | bash</div>
+        <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.0/install.sh | bash</div>
         <button class="btn install-copy" onclick="copyInstall()">Copy</button>
       </div>
       <p class="install-note">Then open <code>http://localhost:3000</code> and deploy your first model.</p>
@@ -136,7 +136,7 @@
   <!-- ======= DASHBOARD ======= -->
   <section id="dashboard" class="hidden">
     <nav class="nav">
-      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><text x="30" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="42" fill="#ffffff">S</text><rect x="46" y="46" width="12" height="12" rx="3" fill="#2563eb"/></svg>SursumAI</span>
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><text x="30" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="42" fill="#ffffff">S</text><rect x="46" y="46" width="12" height="12" rx="3" fill="#635bff"/></svg>SursumAI</span>
       <div class="nav-right">
         <span id="userName" class="nav-user hidden"></span>
         <button class="btn btn-ghost" onclick="logout()">Sign out</button>
@@ -156,7 +156,7 @@
         </div>
         <div>
           <button class="btn btn-ghost hidden" id="poolBtn" onclick="openPoolModal()">+ Pool</button>
-          <button class="btn btn-primary" onclick="openModal()">+ New</button>
+          <button class="btn btn-primary" id="newBtn" onclick="openModal()">+ New</button>
         </div>
       </div>
       <div id="deploysView">
