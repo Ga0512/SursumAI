@@ -1,0 +1,22 @@
+100 items
+
+policy                                     correct  wakes strong  headroom  vs coin
+-----------------------------------------------------------------------------------
+only Qwen/Qwen3-0.6B-GGUF                     69%            0%        0%      +0%
+stage (rules, no judge)                       69%            1%        0%      -0%
+escalation · judge Qwen/Qwen3-0.6B-GGUF       78%           18%       47%      +6%
+escalation · judge Qwen/Qwen3-1.7B-GGUF       85%           22%       84%     +12%
+classifier · judge Qwen/Qwen3-0.6B-GGUF       77%           76%       42%      -5%
+classifier · judge Qwen/Qwen3-1.7B-GGUF       80%           52%       58%      +2%
+round_robin                                   77%           50%       42%      -1%
+oracle                                        88%           19%      100%     +16%
+only Qwen/Qwen3-1.7B-GGUF                     86%          100%       89%      +0%
+
+vs coin = accuracy minus a coin flipped at the same escalation rate.
+          At or below zero the policy is spending, not deciding.
+
+judge quality (does it spot the weak model failing?)
+judge                                       recall  precision   missed   wasted
+-------------------------------------------------------------------------------
+Qwen/Qwen3-0.6B-GGUF                          48%        83%       16        3
+Qwen/Qwen3-1.7B-GGUF                          71%       100%        9        0

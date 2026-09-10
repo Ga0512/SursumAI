@@ -1,0 +1,162 @@
+removed 0 deploy(s)
+100 items · 2 models
+  Qwen/Qwen3-0.6B-GGUF: 100 items to go
+  deploying Qwen/Qwen3-0.6B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    25/100 · 13/25 correct · 8 empty
+    50/100 · 17/50 correct · 8 empty
+    75/100 · 17/75 correct · 8 empty
+    100/100 · 17/100 correct · 8 empty
+  destroying Qwen/Qwen3-0.6B-GGUF
+  WARNING: Qwen/Qwen3-0.6B-GGUF returned 8 empty answers — raise --max-tokens, it is spending the budget on reasoning
+  Qwen/Qwen3-1.7B-GGUF: 100 items to go
+  deploying Qwen/Qwen3-1.7B-GGUF (llama)
+    checking
+    failed
+    port still held by the previous model, waiting 30s
+removed 0 deploy(s)
+100 items · 2 models
+  Qwen/Qwen3-0.6B-GGUF: 71 items to go
+  deploying Qwen/Qwen3-0.6B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    25/71 · 18/25 correct · 5 empty
+    50/71 · 35/50 correct · 9 empty
+    71/71 · 52/71 correct · 11 empty
+  destroying Qwen/Qwen3-0.6B-GGUF
+  note: Qwen/Qwen3-0.6B-GGUF used the whole budget without answering on 11 items
+  Qwen/Qwen3-1.7B-GGUF: 100 items to go
+  deploying Qwen/Qwen3-1.7B-GGUF (llama)
+    checking
+    failed
+    port still held by the previous model, waiting 30s
+  deploying Qwen/Qwen3-1.7B-GGUF (llama)
+    checking
+    failed
+error: deploy failed: port: port 9000 is already in use on this machine — something outside SursumAI is listening on it. Stop it, or destroy the deployment that owns this port.
+removed 0 deploy(s)
+100 items · 2 models
+  Qwen/Qwen3-0.6B-GGUF: already complete, skipping
+  Qwen/Qwen3-1.7B-GGUF: 100 items to go
+  deploying Qwen/Qwen3-1.7B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    25/100 · 22/25 correct · 1 empty
+    50/100 · 44/50 correct · 1 empty
+    75/100 · 66/75 correct · 3 empty
+    100/100 · 86/100 correct · 6 empty
+  destroying Qwen/Qwen3-1.7B-GGUF
+  note: Qwen/Qwen3-1.7B-GGUF used the whole budget without answering on 6 items
+
+done — bench/runs/gsm8k-100/answers.jsonl
+next: python bench/run_judges.py --run bench/runs/gsm8k-100
+Exception ignored error evaluating path:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 268, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x000079cc97923080 (most recent call first):
+  <no Python frame>
+Exception ignored error evaluating path:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 268, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x0000793f2e0e7080 (most recent call first):
+  <no Python frame>
+judges step failed (attempt 1/3), retrying
+Exception ignored error evaluating path:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 268, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x0000763669b12080 (most recent call first):
+  <no Python frame>
+Exception ignored error evaluating path:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 268, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007c83b1fc9080 (most recent call first):
+  <no Python frame>
+judges step failed (attempt 2/3), retrying
+Exception ignored error evaluating path:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 268, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x000073959505e080 (most recent call first):
+  <no Python frame>
+removed 0 deploy(s)
+100 items · 2 models
+  Qwen/Qwen3-0.6B-GGUF: already complete, skipping
+  Qwen/Qwen3-1.7B-GGUF: already complete, skipping
+
+done — bench/runs/gsm8k-100/answers.jsonl
+next: python bench/run_judges.py --run bench/runs/gsm8k-100
+100 answers from Qwen/Qwen3-0.6B-GGUF · 2 judges
+  deploying Qwen/Qwen3-0.6B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    escalate 25/100
+    escalate 50/100
+    escalate 75/100
+    escalate 100/100
+    choice 25/100
+    choice 50/100
+    choice 75/100
+    choice 100/100
+  destroying Qwen/Qwen3-0.6B-GGUF
+  deploying Qwen/Qwen3-1.7B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    escalate 25/100
+    escalate 50/100
+    escalate 75/100
+    escalate 100/100
+    choice 25/100
+    choice 50/100
+    choice 75/100
+    choice 100/100
+  destroying Qwen/Qwen3-1.7B-GGUF
+
+done — now: python bench/score.py --run bench/runs/gsm8k-100
+100 items
+
+policy                                     correct  wakes strong  headroom  vs coin
+-----------------------------------------------------------------------------------
+only Qwen/Qwen3-0.6B-GGUF                     69%            0%        0%      +0%
+stage (rules, no judge)                       69%            1%        0%      -0%
+escalation · judge Qwen/Qwen3-0.6B-GGUF       78%           18%       47%      +6%
+escalation · judge Qwen/Qwen3-1.7B-GGUF       85%           22%       84%     +12%
+classifier · judge Qwen/Qwen3-0.6B-GGUF       77%           76%       42%      -5%
+classifier · judge Qwen/Qwen3-1.7B-GGUF       80%           52%       58%      +2%
+round_robin                                   77%           50%       42%      -1%
+oracle                                        88%           19%      100%     +16%
+only Qwen/Qwen3-1.7B-GGUF                     86%          100%       89%      +0%
+
+vs coin = accuracy minus a coin flipped at the same escalation rate.
+          At or below zero the policy is spending, not deciding.
+
+judge quality (does it spot the weak model failing?)
+judge                                       recall  precision   missed   wasted
+-------------------------------------------------------------------------------
+Qwen/Qwen3-0.6B-GGUF                          48%        83%       16        3
+Qwen/Qwen3-1.7B-GGUF                          71%       100%        9        0
+BENCH_DONE

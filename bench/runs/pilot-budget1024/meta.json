@@ -1,0 +1,9 @@
+{
+  "ladder": [
+    "Qwen/Qwen3-0.6B-GGUF"
+  ],
+  "judges": [],
+  "dataset": "gsm8k",
+  "items": 50,
+  "synthetic": false
+}

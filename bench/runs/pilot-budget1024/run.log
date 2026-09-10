@@ -1,0 +1,13 @@
+50 items · 1 models
+  Qwen/Qwen3-0.6B-GGUF: 50 items to go
+  deploying Qwen/Qwen3-0.6B-GGUF (llama)
+    checking
+    provisioning
+    healthy
+    25/50 · 11/25 correct · 12 empty
+    50/50 · 22/50 correct · 23 empty
+  destroying Qwen/Qwen3-0.6B-GGUF
+  WARNING: Qwen/Qwen3-0.6B-GGUF returned 23 empty answers — raise --max-tokens, it is spending the budget on reasoning
+
+done — bench/runs/pilot/answers.jsonl
+next: python bench/run_judges.py --run bench/runs/pilot
