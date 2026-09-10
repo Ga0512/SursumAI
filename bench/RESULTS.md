@@ -85,15 +85,41 @@ mensagem. Em mediana, por mensagem:
 O 1.7B é só ~60% mais lento que o 0.6B. Com um gap tão pequeno, pagar a
 resposta do fraco mais o juiz custa tanto quanto chamar o forte direto. O
 roteamento **decide bem** (+12 sobre a moeda), mas só **paga** quando o modelo
-forte é muito mais caro que o fraco — um 8B, ou um modelo de nuvem. Isso ainda
-não foi medido aqui.
+forte é muito mais caro que o fraco — que é o caso do 8B, logo abaixo.
+
+### Com um modelo forte caro de verdade: 0.6B → 8B
+
+Mesmos 100 itens, mesmas respostas do 0.6B e mesmos vereditos dos juízes (eles
+não dependem de quem é o forte) — só a coluna do forte foi gerada de novo, com
+o Qwen3-8B. Nos 6 GB da máquina ele não cabe inteiro: o `-ngl auto` pôs 4,2 GB
+na GPU e o resto na CPU, a 16 tokens/s. Dados em `runs/gsm8k-100-8b/`.
+
+| política | acerto | chama o 8B pra responder | vs moeda | tempo médio por mensagem |
+|---|---|---|---|---|
+| só o 0.6B | 69% | 0% | — | 11,8 s |
+| `escalation`, juiz 0.6B | 80% | 18% | +7 | **33 s** (11,8 + 1,9 + 18% × 107,1) |
+| **`escalation`, juiz 1.7B** | **87%** | **22%** | **+13** | **39 s** (11,8 + 3,5 + 22% × 107,1) |
+| oráculo | 93% | 24% | +18 | — |
+| só o 8B | 93% | 100% | — | **107 s** |
+
+Aqui o roteamento paga: com o juiz de 1.7B, **87% de acerto em ~39 s por
+mensagem, contra 93% em ~107 s** chamando o 8B sempre — perto de 3x mais
+rápido, perdendo 6 pontos. Com o juiz padrão (o membro mais barato do pool, o
+próprio 0.6B), 80% em ~33 s.
+
+Isso assume **os modelos já carregados**. Nos 6 GB desta máquina o 8B sozinho
+ocupa 4,2 GB: o 0.6B e o 8B juntos não cabem, e o router teria que trocar de
+modelo na VRAM a cada escalação. Essa troca não foi medida e provavelmente
+engole o ganho. A conta acima vale para uma placa onde o pool inteiro fica
+residente. O `classifier` não entra aqui: a escolha dele depende do ladder e
+foi gerada para 0.6B → 1.7B.
 
 Outras ressalvas:
 
 - **100 itens.** O intervalo de confiança de cada acerto é de uns ±7 pontos.
   Diferenças de 1–2 pontos entre linhas não significam nada.
 - **Só matemática.** Não diz nada sobre código, conversa ou visão.
-- **Ladder de dois modelos**, e o juiz de 1.7B é o próprio modelo forte.
+- **Ladders de dois modelos.** No 0.6B → 1.7B o juiz de 1.7B é o próprio forte.
 - **O juiz teve 1024 tokens.** A produção chamava o juiz com `max_tokens=120`,
   pouco pra um modelo que raciocina antes de responder — o veredito saía vazio
   e o router lia isso como "não escala". Corrigido junto com este benchmark:
