@@ -8,10 +8,11 @@ tabela com `python bench/score.py --run bench/runs/gsm8k-100`, sem GPU.
 ## Desvios do plano
 
 O [`PLAN.md`](PLAN.md) previa 300 itens, ladder de quatro modelos (0.6B → 8B) e
-três juízes. Rodamos **100 itens, dois modelos (0.6B e 1.7B) e dois juízes**:
-com o modelo ainda na CPU (bug 1 abaixo) cada pergunta levava ~70 s, e o plano
-completo passava de um dia de máquina. As métricas, o dataset e as colunas de
-controle são os do plano.
+três juízes. Rodamos **100 itens, três modelos (0.6B, 1.7B e 8B, sem o 4B) e
+dois juízes (0.6B e 1.7B)**: com o modelo ainda na CPU (bug 1 abaixo) cada
+pergunta levava ~70 s, e o plano completo passava de um dia de máquina. O 8B
+entrou depois, só como o forte do segundo ladder. As métricas, o dataset e as
+colunas de controle são os do plano.
 
 ## A pergunta
 
