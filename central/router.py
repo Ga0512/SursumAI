@@ -10,6 +10,14 @@ from .db import Store, RouterSession
 
 CONFIRMATIONS = 2
 
+# The judge's budget must leave room to think. Qwen3 and other reasoning models
+# spend tokens before they answer, and those count against max_tokens: at the
+# old 120 a thinking judge could return an empty verdict, which the router reads
+# as "do not escalate" — the router would quietly never route. The benchmark
+# (bench/RESULTS.md) measured the judge at 1024; production now matches it.
+JUDGE_MAX_TOKENS = 1024
+JUDGE_TIMEOUT = 120.0
+
 # ---- stage mode: rule-based routing (no LLM, zero latency) ----
 # Bilingual on purpose: an English-only prompt used to never escalate, because
 # every signal here was Portuguese. Accents are stripped before matching, so
@@ -143,12 +151,12 @@ def _judge(store: Store, pool, session_id: str, user_id: str,
                 "weak_reply": weak_reply,
             }, ensure_ascii=False)},
         ],
-        "max_tokens": 120,
+        "max_tokens": JUDGE_MAX_TOKENS,
         "temperature": 0.0,
         "stream": False,
     }
     try:
-        result = agent_client.chat(judge_endpoint, payload, timeout=60.0,
+        result = agent_client.chat(judge_endpoint, payload, timeout=JUDGE_TIMEOUT,
                                    api_key=judge.spec.api_key)
     except agent_client.AgentError:
         return False
@@ -324,12 +332,12 @@ def _classifier_choice(store: Store, pool, candidates: list,
             {"role": "system", "content": CLASSIFIER_PROMPT.format(candidates=lines)},
             {"role": "user", "content": _last_user_text(messages)},
         ],
-        "max_tokens": 120,
+        "max_tokens": JUDGE_MAX_TOKENS,
         "temperature": 0.0,
         "stream": False,
     }
     try:
-        result = agent_client.chat(judge.endpoint, payload, timeout=60.0,
+        result = agent_client.chat(judge.endpoint, payload, timeout=JUDGE_TIMEOUT,
                                    api_key=judge.spec.api_key)
         raw = _content_of(result)
         verdict = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])

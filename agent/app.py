@@ -52,6 +52,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
+
+# seconds to wait for a just-freed deploy port (see _port_check)
+PORT_RELEASE_WAIT = float(os.environ.get("SURSUMAI_PORT_WAIT", 90))
+
 app = FastAPI(title="SursumAI Agent", lifespan=lifespan)
 
 
@@ -261,9 +265,11 @@ def _port_check(spec: Spec) -> dict:
         return {"name": "port", "ok": False,
                 "detail": f"port {port} is outside the deploy range "
                           f"{ports.PORT_MIN}-{ports.PORT_MAX}"}
-    # waits a few seconds: a deploy created right after destroying another one
-    # would otherwise be refused a port that is still being released
-    if ports.wait_until_free(port):
+    # A deploy created right after destroying another is handed the port that
+    # was just freed. The old server can take a while to let go of it — Docker
+    # Desktop's port proxy regularly needs 30s+ after the container is gone —
+    # so wait long enough to cover that before calling the port taken.
+    if ports.wait_until_free(port, timeout=PORT_RELEASE_WAIT):
         return {"name": "port", "ok": True, "detail": f"port {port} is free"}
     return {
         "name": "port", "ok": False,

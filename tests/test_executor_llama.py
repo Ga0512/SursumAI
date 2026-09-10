@@ -369,11 +369,14 @@ def test_the_container_mounts_the_key_file_read_only(paths):
     ex._remove_key_file("kf4")
 
 
-def test_mounts_come_before_the_image(paths):
+@pytest.mark.parametrize("gpu", [True, False])
+def test_mounts_come_before_the_image(paths, monkeypatch, gpu):
     """Everything after the image name is an argument to llama-server, not to
-    docker -- a `-v` there would be handed to the model server and rejected."""
+    docker -- a `-v` there would be handed to the model server and rejected.
+    Pinned both ways: whether this machine has a GPU must not decide the test."""
+    monkeypatch.setattr(ex, "_gpu_available", lambda: gpu)
     cmd = ex._docker_build_cmd(_spec(api_key="sk-sursum-secret"), "kf5", paths)
-    image_at = cmd.index(ex.IMAGE)
+    image_at = cmd.index(ex.IMAGE_CUDA if gpu else ex.IMAGE)
     assert "-v" not in cmd[image_at:]
     ex._remove_key_file("kf5")
 
@@ -429,3 +432,33 @@ def test_the_vllm_container_also_keeps_its_secrets_out_of_argv():
     env = executor.runtime_env(spec)
     assert env["VLLM_API_KEY"] == "sk-sursum-secret"
     assert env["HF_TOKEN"] == "hf_secret"
+
+
+def test_the_docker_command_offloads_layers_when_it_hands_over_the_gpu(paths, monkeypatch):
+    """--gpus all alone gives the container the card; llama-server still keeps
+    every layer on the CPU unless it is told otherwise. Both or neither."""
+    monkeypatch.setattr(ex, "_gpu_available", lambda: True)
+    cmd = ex._docker_build_cmd(_spec(), "id", paths)
+    assert "--gpus" in cmd and "-ngl" in cmd
+    # the plain :server image has no CUDA; -ngl on it is silently ignored
+    assert ex.IMAGE_CUDA in cmd and ex.IMAGE not in cmd
+    assert cmd.index("-ngl") > cmd.index(ex.IMAGE_CUDA),         "-ngl is a llama-server flag: it goes after the image"
+    # a fixed layer count disables --fit; a model bigger than the card must
+    # be split, not refused
+    assert cmd[cmd.index("-ngl") + 1] == "auto"
+
+    monkeypatch.setattr(ex, "_gpu_available", lambda: False)
+    cmd = ex._docker_build_cmd(_spec(), "id", paths)
+    assert "--gpus" not in cmd and "-ngl" not in cmd
+    assert ex.IMAGE in cmd and ex.IMAGE_CUDA not in cmd
+
+
+@pytest.mark.parametrize("gpu", [True, False])
+def test_the_host_prompt_cache_is_bounded(paths, monkeypatch, gpu):
+    """llama-server defaults to an 8 GiB host-RAM prompt cache — more than a
+    stock WSL has. Left alone it grows until the OOM killer takes the server."""
+    monkeypatch.setattr(ex, "_gpu_available", lambda: gpu)
+    for cmd in (ex._docker_build_cmd(_spec(), "id", paths),
+                ex._binary_build_cmd(_spec(), "id", paths, "llama-server")):
+        mib = int(cmd[cmd.index("--cache-ram") + 1])
+        assert 256 <= mib <= 2048

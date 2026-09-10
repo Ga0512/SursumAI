@@ -578,7 +578,7 @@ async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_curre
         )
     try:
         result = await asyncio.to_thread(
-            agent_client.chat, deploy.endpoint, payload, 180.0, deploy.spec.api_key,
+            agent_client.chat, deploy.endpoint, payload, None, deploy.spec.api_key,
         )
     except agent_client.AgentError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -926,7 +926,7 @@ async def _chat_with_deploy(deploy, req: RouterChatRequest):
         )
     try:
         return await asyncio.to_thread(
-            agent_client.chat, deploy.endpoint, payload, 180.0, deploy.spec.api_key)
+            agent_client.chat, deploy.endpoint, payload, None, deploy.spec.api_key)
     except agent_client.AgentError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 

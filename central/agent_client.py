@@ -10,6 +10,27 @@ from core import keys
 AGENT_URL = os.environ.get("AGENT_URL", "http://localhost:8010")
 AGENT_KEY = keys.load_or_create_agent_key()
 
+# How long to wait for one completion. A reasoning model on a laptop GPU can
+# think for minutes on a hard question: the old fixed 180s cut Qwen3-0.6B off on
+# roughly half of GSM8K and reported it as "unreachable" while it was still
+# working. Generous by default, tunable for slower machines.
+CHAT_TIMEOUT = float(os.environ.get("SURSUMAI_CHAT_TIMEOUT", 900))
+
+
+def _is_timeout(e: BaseException) -> bool:
+    reason = getattr(e, "reason", e)
+    return isinstance(e, TimeoutError) or isinstance(reason, TimeoutError)         or "timed out" in str(e)
+
+
+def _unreachable(endpoint: str, e: BaseException, timeout: float) -> str:
+    """Say what actually happened. A model that is busy thinking is not a model
+    that is down, and telling the user it is unreachable sends them to debug
+    the wrong thing."""
+    if _is_timeout(e):
+        return (f"the model took longer than {timeout:.0f}s to answer — it is "
+                f"still running; raise SURSUMAI_CHAT_TIMEOUT for long reasoning")
+    return f"deploy unreachable at {endpoint}: {e}"
+
 
 class AgentError(Exception):
     pass
@@ -63,9 +84,10 @@ def metrics(deploy_id: str) -> dict:
     return _request("GET", f"/deploys/{deploy_id}/metrics")
 
 
-def chat(endpoint: str, payload: dict, timeout: float = 180.0,
+def chat(endpoint: str, payload: dict, timeout: float | None = None,
          api_key: str | None = None) -> dict:
     """POST a chat completion to a deploy's OpenAI-compatible endpoint."""
+    timeout = CHAT_TIMEOUT if timeout is None else timeout
     url = endpoint.rstrip("/") + "/chat/completions"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST")
@@ -82,16 +104,17 @@ def chat(endpoint: str, payload: dict, timeout: float = 180.0,
             detail = ""
         raise AgentError(f"chat failed: HTTP {e.code} {detail}") from None
     except (urllib.error.URLError, OSError) as e:
-        raise AgentError(f"deploy unreachable at {endpoint}: {e}") from None
+        raise AgentError(_unreachable(endpoint, e, timeout)) from None
 
 
-def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0,
+def chat_stream(endpoint: str, payload: dict, timeout: float | None = None,
                 api_key: str | None = None):
     """Generator that forwards raw SSE bytes from a streaming chat completion.
 
     Runs inside the central's threadpool (StreamingResponse), so the blocking
     urllib loop does not stall the event loop.
     """
+    timeout = CHAT_TIMEOUT if timeout is None else timeout
     url = endpoint.rstrip("/") + "/chat/completions"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST")
@@ -109,7 +132,7 @@ def chat_stream(endpoint: str, payload: dict, timeout: float = 180.0,
             detail = ""
         yield f'data: {json.dumps({"error": detail or f"HTTP {e.code}"})}\n\n'.encode()
     except (urllib.error.URLError, OSError) as e:
-        yield f'data: {json.dumps({"error": f"deploy unreachable: {e}"})}\n\n'.encode()
+        yield f'data: {json.dumps({"error": _unreachable(endpoint, e, timeout)})}\n\n'.encode()
 
 
 def stop(deploy_id: str) -> None:

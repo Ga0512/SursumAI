@@ -26,7 +26,33 @@ from core.spec import Spec
 # llama.cpp releases ship no CUDA build for Linux, so docker is the only way to
 # get CUDA without compiling from source; on machines without an NVIDIA GPU the
 # tiny native binary is faster to bring up than a multi-GB docker image.
-IMAGE = "ghcr.io/ggml-org/llama.cpp:server"
+IMAGE = "ghcr.io/ggml-org/llama.cpp:server"            # CPU-only build
+# The plain :server image has no CUDA in it: given --gpus all and -ngl it logs
+# "no usable GPU found" and runs every layer on the CPU. That is what the
+# NVIDIA + Docker path shipped with, so an RTX card sat at 0 MiB.
+IMAGE_CUDA = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+
+
+def _cache_ram_mib() -> int:
+    """Cap llama-server's host-RAM prompt cache.
+
+    Its default is 8192 MiB, which is more than a stock WSL has in total: under
+    steady traffic the cache fills, the server passes 5 GB of RSS and the OOM
+    killer takes it mid-request — even with every layer on the GPU. An eighth
+    of the machine keeps the prefix reuse that makes multi-turn chat fast
+    without betting the process on it.
+    """
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 * 1024)
+    except (ValueError, OSError, AttributeError):
+        return 512
+    return max(256, min(2048, total // 8))
+
+
+def _image(spec: Spec | None = None) -> str:
+    """The llama.cpp image that can actually use this machine's GPU."""
+    wants_gpu = spec is None or bool(spec.gpus)
+    return IMAGE_CUDA if wants_gpu and _gpu_available() else IMAGE
 CONTAINER_KEY = "/run/sursumai/api.key"  # where the key file is mounted
 LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "llama-models"
@@ -147,9 +173,10 @@ def _docker_info() -> None:
         raise TransportError("Docker is not running or not installed")
 
 
-def _image_present() -> bool:
+def _image_present(image: str | None = None) -> bool:
     try:
-        result = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, timeout=15)
+        result = subprocess.run(["docker", "image", "inspect", image or _image()],
+                                capture_output=True, timeout=15)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
@@ -491,10 +518,11 @@ def preflight(spec: Spec) -> list[dict]:
         except TransportError as e:
             checks.append({"name": "docker", "ok": False, "detail": str(e)})
 
-        if _image_present():
-            checks.append({"name": "image", "ok": True, "detail": f"image cached ({IMAGE})"})
+        image = _image(spec)
+        if _image_present(image):
+            checks.append({"name": "image", "ok": True, "detail": f"image cached ({image})"})
         else:
-            checks.append({"name": "image", "ok": True, "detail": f"image will be pulled ({IMAGE})"})
+            checks.append({"name": "image", "ok": True, "detail": f"image will be pulled ({image})"})
     else:
         try:
             exe = _ensure_binary()
@@ -568,19 +596,20 @@ def _is_gguf(path: Path) -> bool:
 def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list[str]:
     port = deploy_port(deploy_id, spec)
     model_dir = Path(paths["gguf"]).parent
+    on_gpu = bool(spec.gpus) and _gpu_available()
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", _docker_name(deploy_id),
         "-p", f"{port}:8080",
         "-v", f"{model_dir}:/models:ro",
     ]
-    if spec.gpus and _gpu_available():
+    if on_gpu:
         cmd += ["--runtime", "nvidia", "--gpus", "all"]
     # the key is mounted as a read-only file; only its path reaches argv
     if spec.api_key:
         cmd += ["-v", f"{_write_key_file(deploy_id, spec.api_key)}:{CONTAINER_KEY}:ro"]
     cmd += [
-        IMAGE,
+        IMAGE_CUDA if on_gpu else IMAGE,
         "--model", f"/models/{Path(paths['gguf']).name}",
         "--host", "0.0.0.0",
         "--port", "8080",
@@ -589,7 +618,15 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
         "--cache-reuse", "1",
+        "--cache-ram", str(_cache_ram_mib()),
     ]
+    # Offload as many layers as the card holds and no more. "auto" leaves
+    # llama.cpp's --fit free to size the offload to free VRAM, so a model
+    # bigger than the card (an 8B on 6 GB) runs split across GPU and CPU
+    # instead of failing to load. A fixed count like 999 pins the value and
+    # switches that fitting off.
+    if on_gpu:
+        cmd += ["-ngl", "auto"]
     if spec.api_key:
         cmd += ["--api-key-file", CONTAINER_KEY]
     if paths.get("mmproj"):
@@ -609,9 +646,10 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
         "-t", str(max(2, min(spec.gpus * 4, 16))),
         "--metrics",
         "--cache-reuse", "1",
+        "--cache-ram", str(_cache_ram_mib()),
     ]
     if _runtime_strategy() in ("vulkan", "cuda"):
-        cmd += ["-ngl", "999"]
+        cmd += ["-ngl", "auto"]   # fit to free VRAM, see _docker_build_cmd
     # only the path reaches argv; the key itself stays in a 0600 file
     if spec.api_key:
         cmd += ["--api-key-file", _write_key_file(deploy_id, spec.api_key)]
@@ -643,11 +681,12 @@ def start(spec: Spec, deploy_id: str) -> str:
 
     if _runtime_strategy() == "docker":
         _docker_info()
-        if _image_present():
-            _log(deploy_id, f"=== using local image {IMAGE} ===")
+        image = _image(spec)
+        if _image_present(image):
+            _log(deploy_id, f"=== using local image {image} ===")
         else:
-            _log(deploy_id, f"=== pulling image {IMAGE} (first run may take a while) ===")
-            _stream_logs(log_path, ["docker", "pull", IMAGE])
+            _log(deploy_id, f"=== pulling image {image} (first run may take a while) ===")
+            _stream_logs(log_path, ["docker", "pull", image])
             _log(deploy_id, "=== image ready, starting container ===")
         cmd = _docker_build_cmd(spec, deploy_id, paths)
         _log(deploy_id, ">>> " + " ".join(cmd))
