@@ -1,5 +1,13 @@
 const API = "/api";
 
+/* The URL a program outside this page should use. API is relative — fine for
+   the browser, which goes through the web server's proxy, but a snippet with
+   base_url="/api/v1" fails the moment someone pastes it into Python. Clients
+   talk to the central directly, on the same host the UI was opened on. */
+function publicBaseUrl() {
+  return `${location.protocol}//${location.hostname}:8001/v1`;
+}
+
 let selectedTarget = "local";
 let selectedRuntime = "vllm";
 let creating = false;
@@ -477,7 +485,11 @@ function cardHTML(d) {
   const err = d.error ? `<div class="meta" style="color:var(--red)">${d.error}</div>` : "";
   const stageLabel = deployStageLabel(d);
   const stage = stageLabel ? `<div class="meta">${stageLabel}</div>` : "";
-  const checks = d.preflight && d.preflight.length ? `
+  // The preflight checklist explains a deploy that is coming up or that
+  // failed. Once it is healthy, seven green ticks on every card are noise —
+  // they stay one click away, in Details.
+  const showChecks = status !== "healthy" && d.preflight && d.preflight.length;
+  const checks = showChecks ? `
     <div class="preflight">
       ${d.preflight.map((c) => `
         <span class="preflight-item ${c.ok ? "ok" : "bad"}">
@@ -485,16 +497,25 @@ function cardHTML(d) {
         </span>`).join("")}
     </div>` : "";
   const m = d.metrics;
+  // llama.cpp does not export request counts or KV usage; a 0 there reads as
+  // "nothing happened", so show the same dash as for TTFT
+  // llama.cpp does not export request counts, TTFT, per-token latency or KV
+  // usage. Four tiles of dashes on every llama card was noise, so they are
+  // left out there and kept for vLLM, which fills them.
+  const onLlama = m && m.runtime === "llama";
+  const tiles = m ? [
+    ["Output", fmtTokens(m.generation_tokens), true],
+    ["Input", fmtTokens(m.prompt_tokens), true],
+    ["Output/s", m.generation_tokens_per_s ?? "—", true],
+    ["Requests", m.requests, false],
+    ["TTFT", m.ttft_avg_ms ? m.ttft_avg_ms + "ms" : "—", false],
+    ["Token/s", m.output_token_avg_ms ? Math.round(1000 / m.output_token_avg_ms) + "/s" : "—", false],
+    ["KV cache", (m.kv_cache_usage_perc ?? 0) + "%", false],
+    ["Queue", `${m.num_running} / ${m.num_waiting}`, true],
+  ].filter(([, , llama]) => llama || !onLlama) : [];
   const metrics = m && status === "healthy" ? `
     <div class="metrics-grid">
-      <div class="metric"><span>Output</span><b>${fmtTokens(m.generation_tokens)}</b></div>
-      <div class="metric"><span>Input</span><b>${fmtTokens(m.prompt_tokens)}</b></div>
-      <div class="metric"><span>Output/s</span><b>${m.generation_tokens_per_s ?? "—"}</b></div>
-      <div class="metric"><span>Requests</span><b>${m.requests}</b></div>
-      <div class="metric"><span>TTFT</span><b>${m.ttft_avg_ms ? m.ttft_avg_ms + "ms" : "—"}</b></div>
-      <div class="metric"><span>Token/s</span><b>${m.output_token_avg_ms ? Math.round(1000 / m.output_token_avg_ms) + "/s" : "—"}</b></div>
-      <div class="metric"><span>KV cache</span><b>${m.kv_cache_usage_perc ?? 0}%</b></div>
-      <div class="metric"><span>Queue</span><b>${m.num_running} / ${m.num_waiting}</b></div>
+      ${tiles.map(([k, v]) => `<div class="metric"><span>${k}</span><b>${v}</b></div>`).join("")}
     </div>
     <div class="spark-row">
       <span class="spark-label">Output tokens / s</span>
@@ -577,7 +598,7 @@ async function loadApiKeys() {
     list.innerHTML = `<div class="keys-empty">Could not reach the server.</div>`;
     return;
   }
-  document.getElementById("keysBaseUrl").textContent = `${API}/v1`;
+  document.getElementById("keysBaseUrl").textContent = publicBaseUrl();
   if (!keys.length) {
     list.innerHTML = `<div class="keys-empty">No keys yet. Create one to call your
       models from anywhere.</div>`;
@@ -824,18 +845,20 @@ function renderDetailMetrics(d) {
   const ttftVal = isLlama ? "—" : (m.ttft_avg_ms ? m.ttft_avg_ms + "ms" : "—");
   const latVal = isLlama ? "—" : (m.e2e_latency_avg_ms ? m.e2e_latency_avg_ms + "ms" : "—");
 
+  // [label, value, exported by llama.cpp?] — a llama deploy used to show six
+  // tiles that could never hold a number; the ones it cannot fill are dropped
   const cards = [
-    ["Output tokens", fmtTokens(m.generation_tokens)],
-    ["Output /s", m.generation_tokens_per_s ?? "—"],
-    ["Input /s", m.prompt_tokens_per_s ?? "—"],
-    ["Requests", reqVal],
-    ["Failed", failVal],
-    ["Queue", `${m.num_running} / ${m.num_waiting}`],
-    ["KV cache", kvVal],
-    ["TTFT", ttftVal],
-    ["Latency", latVal],
-    ["Cached", fmtTokens(m.prompt_tokens_cached)],
-  ];
+    ["Output tokens", fmtTokens(m.generation_tokens), true],
+    ["Output /s", m.generation_tokens_per_s ?? "—", true],
+    ["Input /s", m.prompt_tokens_per_s ?? "—", true],
+    ["Queue", `${m.num_running} / ${m.num_waiting}`, true],
+    ["Requests", reqVal, false],
+    ["Failed", failVal, false],
+    ["KV cache", kvVal, false],
+    ["TTFT", ttftVal, false],
+    ["Latency", latVal, false],
+    ["Cached", fmtTokens(m.prompt_tokens_cached), false],
+  ].filter(([, , onLlama]) => onLlama || !isLlama);
   document.getElementById("detailMetricsGrid").innerHTML =
     cards.map(([k, v]) => `<div class="metric"><span>${k}</span><b>${v}</b></div>`).join("");
 
@@ -968,9 +991,12 @@ async function sendPlay() {
     const box = document.getElementById("playMessages");
     const div = document.createElement("div");
     div.className = "msg assistant";
-    div.innerHTML = '<div class="role">Assistant</div><div class="think hidden"></div><div class="content"></div>';
+    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details><div class="content"></div>';
     box.appendChild(div);
     const thinkEl = div.querySelector(".think");
+    // reasoning is collapsed by default: on a thinking model it is longer than
+    // the answer and pushed the answer out of view
+    const thinkBody = div.querySelector(".think-body");
     const contentEl = div.querySelector(".content");
 
     const reader = res.body.getReader();
@@ -997,7 +1023,7 @@ async function sendPlay() {
             if (!delta) continue;
             if (delta.reasoning_content) {
               thinkEl.classList.remove("hidden");
-              thinkEl.textContent += delta.reasoning_content;
+              thinkBody.textContent += delta.reasoning_content;
             }
             if (delta.content) contentEl.textContent += delta.content;
             box.scrollTop = box.scrollHeight;
@@ -1010,10 +1036,11 @@ async function sendPlay() {
     }
     if (contentEl.textContent) {
       getPlayHistory().push({ role: "assistant", content: contentEl.textContent });
+      contentEl.innerHTML = renderMarkdown(contentEl.textContent);
     }
     const ctx = usage ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) : 0;
     const meta = usage
-      ? `memória da conversa: ${ctx} tokens no total (KV cache): o modelo lembra de tudo que você disse`
+      ? `conversation memory: ${ctx} tokens in context — the model remembers everything said so far`
       : "";
     if (meta) {
       const m = document.createElement("div");
@@ -1060,7 +1087,7 @@ function switchLang(lang) {
 function buildSnippets(d) {
   // the account's key and the central's URL: the deployment's own port and
   // internal key are implementation details the user never has to touch
-  const url = API;
+  const url = publicBaseUrl().replace(/\/v1$/, "");
   const model = d.spec.model;
   const python = `from openai import OpenAI
 
@@ -1115,6 +1142,20 @@ async function copySnippet() {
   catch { toast(currentSnippet.slice(0, 60) + "…"); }
 }
 
+/* Just enough markdown for model replies: models answer in markdown all the
+   time, and raw **asterisks** made every answer look unfinished. The text is
+   HTML-escaped first, so nothing the model writes can become markup. */
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/g,
+                      (_, code) => `<pre class="md-pre"><code>${code.replace(/\n$/, "")}</code></pre>`);
+  html = html.replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/^#{1,6} +(.+)$/gm, "<strong>$1</strong>");
+  html = html.replace(/^([ \t]*)[-*] +/gm, "$1• ");
+  return html;
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1155,7 +1196,7 @@ async function loadPoolsView() {
     const res = await fetch(`${API}/deploys`, { headers: authHeaders() });
     if (res.ok) deploys = await res.json();
   } catch {}
-  const nameById = Object.fromEntries(deploys.map((d) => [d.id, d.spec.model]));
+  const byId = Object.fromEntries(deploys.map((d) => [d.id, d]));
   const grid = document.getElementById("poolsGrid");
   if (!pools.length) {
     grid.innerHTML = `
@@ -1168,12 +1209,25 @@ async function loadPoolsView() {
     return;
   }
   grid.innerHTML = pools.map((p) => {
-    const models = (p.model_ids || []).map((m) => nameById[m] || m.slice(0, 8)).join(", ");
+    const ids = p.model_ids || [];
+    const models = ids.map((m) => {
+      const d = byId[m];
+      if (!d) return `${m.slice(0, 8)} <em>(removed)</em>`;
+      return d.status === "healthy" ? d.spec.model : `${d.spec.model} <em>(${d.status})</em>`;
+    }).join(", ");
+    // The badge used to be green for every pool, including one whose models
+    // had all been destroyed — it looked ready and answered every message with
+    // an error. The router needs two running members; say so when it has not.
+    const live = ids.filter((m) => byId[m] && byId[m].status === "healthy").length;
+    const mode = p.mode || "escalation";
+    const state = live >= 2 && live === ids.length ? ["healthy", mode]
+      : live >= 2 ? ["pending", `${mode} · ${ids.length - live} down`]
+      : ["failed", `not routing · ${live} of ${ids.length} running`];
     return `
-      <div class="deploy-card glass">
+      <div class="deploy-card pool-card glass">
         <div class="row">
           <span class="model">◆ ${p.name}</span>
-          <span class="status healthy"><span class="dot"></span>${p.mode || "escalation"}</span>
+          <span class="status ${state[0]}"><span class="dot"></span>${state[1]}</span>
         </div>
         <div class="meta">${models}</div>
         <div class="card-actions" onclick="event.stopPropagation()">
@@ -1263,17 +1317,15 @@ async function deleteChatPool() {
 function copyChatApi() {
   const target = document.getElementById("chatTarget").value;
   if (!target) return;
+  // Both go through the public /v1 API with the account key. The model branch
+  // used to point at /deploys/{id}/chat, a management route that refuses API
+  // keys by design — the copied command answered 403 to its own user.
   const pool = target.startsWith("pool:") ? chatPoolList.find((p) => "pool:" + p.id === target) : null;
-  const modelRef = pool ? pool.name : target.slice(5);
-  const snippet = target.startsWith("pool:")
-    ? `curl -X POST http://localhost:8001/v1/chat/completions \\
+  const modelRef = pool ? pool.name : target;
+  const snippet = `curl ${publicBaseUrl()}/chat/completions \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer $TOKEN" \\
-  -d '{"model": "${modelRef}", "messages": [{"role": "user", "content": "Hello!"}]}'`
-    : `curl -X POST http://localhost:8001/deploys/${target}/chat \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer $TOKEN" \\
-  -d '{"messages": [{"role": "user", "content": "Hello!"}]}'`;
+  -H "Authorization: Bearer $SURSUMAI_KEY" \\
+  -d '{"model": "${modelRef}", "messages": [{"role": "user", "content": "Hello!"}]}'`;
   const done = () => toast("API snippet copied!");
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(snippet).then(done).catch(() => toast(snippet.slice(0, 80) + "…"));
@@ -1286,6 +1338,20 @@ let poolHealthyDeploys = [];
 
 let editingPoolId = null;
 
+/* A pool's order is its configuration: first is the cheap model, last the one
+   worth escalating to. The modal used to preselect deploys in whatever order
+   the API returned them — often strongest first, which is a router that sends
+   everything to the expensive model and "escalates" to the cheap one. Sort by
+   the parameter count in the name; models without one keep their place last. */
+function paramsOf(model) {
+  const m = /(\d+(?:\.\d+)?)\s*B(?![a-z])/i.exec(model.split("/").pop());
+  return m ? parseFloat(m[1]) : Infinity;
+}
+
+function cheapestFirst(deploys) {
+  return [...deploys].sort((a, b) => paramsOf(a.spec.model) - paramsOf(b.spec.model));
+}
+
 async function openPoolModal() {
   const deploys = await fetch(`${API}/deploys`, { headers: authHeaders() }).then((r) => r.json());
   const healthy = deploys.filter((d) => d.status === "healthy");
@@ -1296,8 +1362,9 @@ async function openPoolModal() {
   document.getElementById("p_name").value = "";
   const box = document.getElementById("p_models");
   box.innerHTML = "";
-  addPoolModel(healthy[0]?.id);
-  addPoolModel(healthy.length > 1 ? healthy[1].id : healthy[0]?.id);
+  const ladder = cheapestFirst(healthy);
+  addPoolModel(ladder[0]?.id);
+  addPoolModel(ladder.length > 1 ? ladder[ladder.length - 1].id : ladder[0]?.id);
   document.getElementById("poolModal").classList.remove("hidden");
 }
 
@@ -1391,8 +1458,17 @@ async function refreshPoolLog(poolId) {
     const data = await res.json();
     if (!res.ok) { el.textContent = data.detail || "Failed to load log"; return; }
     if (!data.length) { el.textContent = "(no routing decisions yet)"; return; }
+    // the log stores deploy ids and ISO timestamps with microseconds; a person
+    // reading "who answered what" wants the model name and the time of day
+    let deploys = [];
+    try {
+      const r = await fetch(`${API}/deploys`, { headers: authHeaders() });
+      if (r.ok) deploys = await r.json();
+    } catch {}
+    const nameOf = Object.fromEntries(deploys.map((d) => [d.id, d.spec.model]));
+    const when = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     el.textContent = data.map((e) =>
-      `${e.created_at}  ${e.decision.padEnd(10)} -> ${e.model_served.slice(0, 12)}  ${e.tokens} tokens`
+      `${when(e.created_at)}  ${e.decision.padEnd(10)} → ${nameOf[e.model_served] || e.model_served.slice(0, 12)}  ${e.tokens} tokens`
     ).join("\n");
   } catch {
     el.textContent = "Could not reach server";
@@ -1481,9 +1557,12 @@ async function sendChat() {
     const box = document.getElementById("chatMessages");
     const div = document.createElement("div");
     div.className = "msg assistant";
-    div.innerHTML = '<div class="role">Assistant</div><div class="think hidden"></div><div class="content"></div>';
+    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details><div class="content"></div>';
     box.appendChild(div);
     const thinkEl = div.querySelector(".think");
+    // reasoning is collapsed by default: on a thinking model it is longer than
+    // the answer and pushed the answer out of view
+    const thinkBody = div.querySelector(".think-body");
     const contentEl = div.querySelector(".content");
 
     const reader = res.body.getReader();
@@ -1511,7 +1590,7 @@ async function sendChat() {
             if (!delta) continue;
             if (delta.reasoning_content) {
               thinkEl.classList.remove("hidden");
-              thinkEl.textContent += delta.reasoning_content;
+              thinkBody.textContent += delta.reasoning_content;
             }
             if (delta.content) contentEl.textContent += delta.content;
             box.scrollTop = box.scrollHeight;
@@ -1522,7 +1601,10 @@ async function sendChat() {
     if (!contentEl.textContent && thinkEl.classList.contains("hidden")) {
       contentEl.textContent = "(no content)";
     }
-    if (contentEl.textContent) history.push({ role: "assistant", content: contentEl.textContent });
+    if (contentEl.textContent) {
+      history.push({ role: "assistant", content: contentEl.textContent });
+      contentEl.innerHTML = renderMarkdown(contentEl.textContent);
+    }
     if (servedModel && isPool) {
       const tag = document.createElement("div");
       tag.className = "route-tag";

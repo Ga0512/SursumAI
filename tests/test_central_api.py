@@ -482,6 +482,35 @@ def test_a_deployment_is_addressable_by_its_model_name(client, monkeypatch):
     assert seen["api_key"].startswith("sk-internal-")
 
 
+def test_a_direct_answer_names_the_model_that_was_asked_for(client, monkeypatch):
+    """llama-server reports the file it loaded as `model` — a container path
+    like /models/Qwen3-0.6B-Q8_0.gguf. The client gets the name it used."""
+    token = _register(client)
+    _make_deploy(client, token, model="Qwen/Qwen3-0.6B-GGUF")
+    key = _api_key(client, token)["key"]
+
+    def _chat(endpoint, payload, timeout=180.0, api_key=None):
+        return {"model": "/models/Qwen3-0.6B-Q8_0.gguf",
+                "choices": [{"message": {"role": "assistant", "content": "hi"}}]}
+
+    def _chat_stream(endpoint, payload, timeout=180.0, api_key=None):
+        yield b'data: {"model": "/models/Qwen3-0.6B-Q8_0.gguf", "choices": []}\n'
+        yield b"data: [DONE]\n"
+
+    monkeypatch.setattr(central_app.agent_client, "chat", _chat)
+    monkeypatch.setattr(central_app.agent_client, "chat_stream", _chat_stream)
+    ask = {"model": "Qwen/Qwen3-0.6B-GGUF", "messages": [{"role": "user", "content": "hi"}]}
+
+    body = client.post("/v1/chat/completions", json=ask, headers=_auth(key)).json()
+    assert body["model"] == "Qwen/Qwen3-0.6B-GGUF"
+
+    streamed = client.post("/v1/chat/completions", json={**ask, "stream": True},
+                           headers=_auth(key)).text
+    assert "/models/" not in streamed
+    assert '"model": "Qwen/Qwen3-0.6B-GGUF"' in streamed
+    assert "data: [DONE]" in streamed
+
+
 def test_an_unknown_model_says_what_is_available(client):
     token = _register(client)
     _make_deploy(client, token, model="org/real")

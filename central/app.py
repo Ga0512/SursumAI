@@ -747,7 +747,7 @@ def _replay_chunks(text: str, created: int, label: str, reasoning: bool = False)
         yield f"data: {json.dumps(chunk)}\n\n"
 
 
-def _relabel_upstream(raw: bytes, label: str, session_id: str) -> bytes | None:
+def _relabel_upstream(raw: bytes, label: str, session_id: str | None) -> bytes | None:
     """Rewrite `model` on a chunk coming straight from the chosen deploy so
     the client always sees which model answered. Returns None for [DONE],
     which the caller emits itself after the trailer."""
@@ -764,7 +764,8 @@ def _relabel_upstream(raw: bytes, label: str, session_id: str) -> bytes | None:
     except ValueError:
         return raw
     obj["model"] = label
-    obj["session_id"] = session_id
+    if session_id is not None:
+        obj["session_id"] = session_id
     return f"data: {json.dumps(obj)}\n\n".encode()
 
 
@@ -917,18 +918,27 @@ async def _chat_with_deploy(deploy, req: RouterChatRequest):
     }
     if req.temperature is not None:
         payload["temperature"] = req.temperature
+    # llama-server answers with the file it loaded ("/models/Qwen3-1.7B-Q8_0.gguf")
+    # as `model`. A client asked for a model by name and gets that name back.
     if req.stream:
+        def as_requested():
+            for raw in agent_client.chat_stream(deploy.endpoint, payload,
+                                                api_key=deploy.spec.api_key):
+                line = _relabel_upstream(raw, deploy.spec.model, None)
+                yield b"data: [DONE]\n\n" if line is None else line
         return StreamingResponse(
-            agent_client.chat_stream(deploy.endpoint, payload,
-                                     api_key=deploy.spec.api_key),
+            as_requested(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             agent_client.chat, deploy.endpoint, payload, None, deploy.spec.api_key)
     except agent_client.AgentError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+    if isinstance(result, dict):
+        result["model"] = deploy.spec.model
+    return result
 
 
 def _session_expired(session: RouterSession) -> bool:

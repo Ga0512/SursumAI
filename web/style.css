@@ -438,6 +438,9 @@ select.input, .select { cursor: pointer; }
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .deploy-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
+/* pool cards have no click-through; only their buttons act */
+.pool-card { cursor: default; }
+.deploy-card .meta em { font-style: normal; color: var(--red); }
 .deploy-card .row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .deploy-card .row .url { flex: 1; min-width: 0; }
 .deploy-card .model { font-weight: 600; font-size: 1.05rem; color: var(--ink); letter-spacing: -0.015em; }
@@ -667,6 +670,8 @@ select.input, .select { cursor: pointer; }
 .cfg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
 .hf-field { margin-top: var(--s3); }
 .modal .fields { display: flex; flex-direction: column; gap: var(--s4); margin-bottom: var(--s5); }
+/* modals that list .field directly (the pool modal) get the same rhythm */
+.modal > .field { margin-bottom: var(--s4); }
 .modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
 
 .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--surface-sunken); border-radius: var(--r); }
@@ -758,10 +763,39 @@ select.input, .select { cursor: pointer; }
   padding: 0.6em 0.8em;
 }
 .msg.user .content, .msg.user .body { background: var(--accent); color: #fff; }
+.msg .content strong { color: #fff; font-weight: 600; }
+.msg .md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82em;
+  background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 4px;
+}
+.msg .md-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem;
+  background: rgba(0,0,0,0.25); border-radius: var(--r-sm);
+  padding: var(--s2) var(--s3); margin: var(--s1) 0;
+  white-space: pre; overflow-x: auto;
+}
+/* an answer that has not started yet: a quiet pulse, not an empty grey bar */
+.msg:not(.user) .content:empty::before {
+  content: "thinking…";
+  color: #7c8ca4; font-style: italic;
+  animation: pulse 1.4s ease-in-out infinite;
+}
 .msg.error .content, .msg.error .body { color: #ffb4c4; background: rgba(193,39,79,0.18); }
 .msg .think, .msg .body.think {
-  font-size: 0.8rem; color: #93a3b8; font-style: italic;
+  font-size: 0.8rem; color: #93a3b8;
   background: none; padding: 0;
+}
+.msg details.think summary {
+  cursor: pointer; user-select: none;
+  font-size: 0.72rem; font-weight: 500; letter-spacing: 0.02em;
+  color: #7c8ca4; list-style: none;
+}
+.msg details.think summary::-webkit-details-marker { display: none; }
+.msg details.think summary::before { content: "▸ "; }
+.msg details.think[open] summary::before { content: "▾ "; }
+.msg details.think summary:hover { color: #b3c0d3; }
+.msg .think-body {
+  margin-top: var(--s1); font-style: italic;
   white-space: pre-wrap; word-break: break-word;
 }
 .msg .meta { font-size: 0.7rem; color: #6b7c95; }
@@ -938,6 +972,8 @@ select.input, .select { cursor: pointer; }
 .spark-row { display: flex; align-items: flex-end; gap: var(--s3); margin-top: var(--s3); }
 .spark-label { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); flex: none; padding-bottom: 4px; }
 .spark { width: 100%; height: 44px; display: block; }
+/* the detail modal wraps the sparkline in a span; let it stretch like the card's */
+#detailSpark { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: var(--s3); }
 .spark-empty { flex: 1; text-align: center; color: var(--text-muted); font-size: 0.8rem; padding: var(--s3) 0; }
 .spark-last { flex: none; font-weight: 600; font-size: 0.85rem; color: var(--accent); font-variant-numeric: tabular-nums; padding-bottom: 2px; }
 

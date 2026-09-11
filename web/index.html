@@ -185,7 +185,7 @@
           <button class="dash-tab" data-view="keys" onclick="switchDash('keys')">API keys</button>
         </div>
         <div>
-          <button class="btn btn-ghost hidden" id="poolBtn" onclick="openPoolModal()">+ Pool</button>
+          <button class="btn btn-primary hidden" id="poolBtn" onclick="openPoolModal()">+ New pool</button>
           <button class="btn btn-primary" id="newBtn" onclick="openModal()">+ New</button>
         </div>
       </div>
@@ -450,7 +450,7 @@
         <input id="p_name" class="input" placeholder="e.g. Default" autocomplete="off" />
       </div>
       <div class="field">
-        <label>Models <span class="opt">(2+; the router picks between them)</span></label>
+        <label>Models <span class="opt">(2+, cheapest first — escalation goes down this list)</span></label>
         <div id="p_models" class="pool-models"></div>
         <button type="button" class="btn btn-ghost pool-add" onclick="addPoolModel()">+ Add model</button>
       </div>
