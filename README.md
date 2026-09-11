@@ -17,7 +17,7 @@ Pick a model, click **Deploy**, and any OpenAI-compatible app can talk to it.
 
 ```bash
 # 1. install (WSL on Windows, Terminal on Linux/macOS)
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.3/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.4/install.sh | bash
 
 # 2. the browser opens at http://localhost:3000 — create an account,
 #    click "+ New", pick a model, click Deploy
@@ -76,7 +76,7 @@ Real deployments on a 6 GB NVIDIA GPU — Qwen3-0.6B and Qwen3-1.7B, live.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.3/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.4/install.sh | bash
 ```
 
 The installer downloads a **released tag** — never a moving branch — and

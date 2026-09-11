@@ -147,7 +147,7 @@ function toast(msg) {
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.3/install.sh | bash";
+const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.4/install.sh | bash";
 
 function copyInstall() {
   const btn = document.querySelector(".install-copy");
