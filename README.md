@@ -43,14 +43,18 @@ That's the whole product: one URL, one key, and the model name.
 
 ## Screenshots
 
+Real deployments on a 6 GB NVIDIA GPU — Qwen3-0.6B and Qwen3-1.7B, live.
+
 | | |
 |---|---|
 | ![Landing](docs/screenshots/01-landing.png) | ![Dashboard](docs/screenshots/02-dashboard.png) |
-| **Landing** — one-click self-hosting | **Dashboard** — your deployments, health and metrics |
-| ![Detail metrics](docs/screenshots/03-detail-metrics.png) | ![Playground](docs/screenshots/04-playground.png) |
-| **Details** — metrics, test and code snippets | **Playground** — chat with the model (vision supported) |
-| ![Chat](docs/screenshots/05-chat.png) | ![Pool modal](docs/screenshots/06-pool-modal.png) |
-| **Chat** — the router picks the best model per message | **Pool** — team up 2+ models; the router decides between them |
+| **Landing** — one-click self-hosting | **Dashboard** — every deployment with its health, throughput and a live tokens/s chart |
+| ![Details](docs/screenshots/03-detail-metrics.png) | ![Code](docs/screenshots/07-code.png) |
+| **Details** — the metrics this runtime actually reports, nothing padded with dashes | **Code** — Python, JavaScript and curl, ready to paste: your URL, your model |
+| ![Test](docs/screenshots/04-playground.png) | ![Router chat](docs/screenshots/05-chat.png) |
+| **Test** — talk to one model; its reasoning stays folded until you open it | **Playground** — send to a pool and every answer says which model served it and why |
+| ![New pool](docs/screenshots/06-pool-modal.png) | ![Benchmark](docs/screenshots/08-benchmark.png) |
+| **Pool** — 2+ models, cheapest first; the router decides who answers | **Benchmark** — the router measured, including what didn't work ([method](bench/README.md)) |
 
 ---
 
@@ -122,6 +126,9 @@ Or double-click the **SursumAI** icon in your app menu / Windows desktop.
   otherwise. The selector is visible in the modal, but you never have to touch it.
 - **Model format** — the provider list shows **safetensors** models (vLLM) and
   **GGUF** models (`llama-server`), already filtered by the chosen runtime.
+- **GPU offload** — as many layers as your card holds go on the GPU. A model
+  bigger than your VRAM is split between GPU and CPU instead of refusing to
+  load: the benchmark ran a Qwen3-8B on a 6 GB card this way.
 - **Ports and internal keys** — allocated and hidden automatically.
 - **Vision** — if the model accepts images (Qwen-VL, Bonsai, …), the **Test**
   tab grows an **Image** button so you can send a photo with your text.
@@ -390,15 +397,16 @@ command exits non-zero on failure, so it's safe to use in scripts.
 
 ## Docker (optional, recommended for GPU)
 
-vLLM runs inside Docker. The installer can set it up for you, or do it manually:
+vLLM runs inside Docker, and with an NVIDIA GPU so does `llama-server` (the
+CUDA build). The installer can set Docker up for you, or do it manually:
 
 1. Install **Docker Desktop**: https://www.docker.com/products/docker-desktop/
 2. On Windows, open Docker settings and enable WSL integration.
 3. Run `sursumai` again.
 
-**No Docker?** SursumAI still works with the native `llama-server`. If you have
-an NVIDIA GPU but no Docker, deployments fall back to CPU and say so — install
-Docker later to unlock the GPU.
+**No Docker?** SursumAI still works with the native `llama-server`. With an
+NVIDIA GPU it uses a native CUDA build (it looks for `libcuda`), so the GPU is
+still used; without one it runs on the CPU. Only vLLM strictly needs Docker.
 
 ## Troubleshooting
 
@@ -407,7 +415,10 @@ Docker later to unlock the GPU.
 | **"Could not reach server"** | The services aren't running. Run `sursumai`. |
 | **Deploy stuck in `failed`** | Open **Logs** on the deployment card — the message explains the problem in plain language. |
 | **Model not showing up** | Some Hugging Face models require accepting a license. Use one of the listed models; they're already cleared. |
-| **Port already in use** | The preflight names the port and the range. A deployment takes the lowest free port in 9000–9099. |
+| **Port already in use** | The preflight names the port and the range. A deployment takes the lowest free port in 9000–9099. A port freed a moment ago is waited for (up to 90 s, `SURSUMAI_PORT_WAIT`). |
+| **"The model took longer than 900s to answer"** | Reasoning models can think for minutes on a slow machine. The model is still running; raise `SURSUMAI_CHAT_TIMEOUT` and restart. |
+| **A pool says "not routing"** | Fewer than two of its models are running. The card lists which ones are down or removed — redeploy them, or edit the pool. |
+| **Slow on an NVIDIA machine** | Open **Logs**: the image line should read `llama.cpp:server-cuda`. Versions before 0.8.2 ran GPU deployments on the CPU — run `sursumai update`. |
 
 Service logs live in `/tmp/opencode/{agent,central,web}.log`; deployment logs in
 `sursumai-logs/`.
