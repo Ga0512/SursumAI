@@ -172,6 +172,12 @@ The router removes the choice. You put 2+ deployments into a **pool** and each
 message goes to the model that should handle it. Your client keeps sending one
 name — `"router"` — and never knows the difference.
 
+> **Does it work?** Measured on 100 GSM8K problems on a 6 GB GPU: routing a
+> Qwen3-0.6B to a Qwen3-8B with a 1.7B judge reached 87% accuracy against 93%
+> for the 8B alone, in about a third of the time per message. It saves nothing
+> when the strong model is barely more expensive than the cheap one. Method,
+> raw data and the results that didn't work: [bench/README.md](bench/README.md).
+
 ### 1. Build the pool
 
 In the web UI: **Pools → + New pool**, name it, and add the deployments in

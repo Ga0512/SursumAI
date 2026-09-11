@@ -98,6 +98,36 @@
       </div>
     </div>
 
+    <div class="landing-section" id="benchmark">
+      <h2>Does the router actually work?</h2>
+      <p class="landing-sub">We measured it: 100 GSM8K maths problems on a single 6&nbsp;GB NVIDIA GPU, every answer checked against the right number &mdash; no LLM grading another.</p>
+      <div class="bench">
+        <div class="bench-table-wrap">
+          <table class="bench-table">
+            <thead>
+              <tr><th>Setup</th><th>Correct</th><th>Time per message</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Qwen3-0.6B alone</td><td>69%</td><td>12&nbsp;s</td></tr>
+              <tr class="bench-hl"><td>Router <span class="bench-note">0.6B + 8B, 1.7B judge</span></td><td>87%</td><td>39&nbsp;s</td></tr>
+              <tr><td>Qwen3-8B alone</td><td>93%</td><td>107&nbsp;s</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="bench-facts">
+          <div class="bench-fact">
+            <b>71%</b>
+            <span>of the small model&rsquo;s mistakes caught by a 1.7B judge, with zero false alarms</span>
+          </div>
+          <div class="bench-fact bench-fact-neg">
+            <b>&minus;5</b>
+            <span>points below a coin flip when a 0.6B judge picks a model from the question alone</span>
+          </div>
+        </div>
+      </div>
+      <p class="bench-caveat">The router pays when the strong model is far more expensive than the cheap one; with a 0.6B&nbsp;+&nbsp;1.7B pool it saved nothing. Times assume every model stays loaded. <a href="https://github.com/Ga0512/SursumAI/tree/main/bench" target="_blank" rel="noopener">Method, raw data and what didn&rsquo;t work &rarr;</a></p>
+    </div>
+
     <div class="landing-install">
       <h2>Install in one command</h2>
       <p class="landing-sub">Runs on Linux, macOS and WSL (Windows). No Docker, Python or GPU knowledge needed.</p>

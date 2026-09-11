@@ -279,7 +279,7 @@ select.input, .select { cursor: pointer; }
   box-shadow: var(--shadow);
 }
 .install-cmd {
-  flex: 1; text-align: left;
+  flex: 1; min-width: 0; text-align: left;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.84rem;
   color: var(--ink-panel-text);
@@ -297,6 +297,64 @@ select.input, .select { cursor: pointer; }
 }
 .install-copy:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.28); }
 .install-note { font-size: 0.875rem; color: var(--text-soft); }
+
+/* --- router benchmark ------------------------------------------------- */
+.bench {
+  display: grid; grid-template-columns: 1.5fr 1fr; gap: var(--s3);
+  text-align: left; align-items: stretch;
+}
+/* grid and flex children default to min-width:auto, so a nowrap cell or a
+   long command widens the whole page past the phone and gets clipped */
+.bench > * { min-width: 0; }
+.bench-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+.bench-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.bench-table th {
+  text-align: left; font-weight: 500; font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.bench-table td {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.bench-table tr:last-child td { border-bottom: none; }
+.bench-table th:not(:first-child), .bench-table td:not(:first-child) { text-align: right; white-space: nowrap; }
+.bench-hl td { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+.bench-note { display: block; font-size: 0.75rem; font-weight: 400; color: var(--text-soft); }
+
+.bench-facts { display: grid; gap: var(--s3); }
+.bench-fact {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--s4) var(--s5);
+  display: flex; flex-direction: column; gap: var(--s1);
+}
+.bench-fact b {
+  font-size: 1.9rem; font-weight: 700; letter-spacing: -0.03em;
+  color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.bench-fact span { font-size: 0.85rem; color: var(--text-soft); line-height: 1.45; }
+/* the negative result gets the same weight as the positive one, on purpose */
+.bench-fact-neg b { color: var(--red); }
+
+.bench-caveat {
+  max-width: 720px; margin: var(--s4) auto 0;
+  font-size: 0.85rem; color: var(--text-muted);
+}
+.bench-caveat a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.bench-caveat a:hover { text-decoration: underline; }
 
 /* ==========================================================================
    Auth
@@ -925,7 +983,7 @@ select.input, .select { cursor: pointer; }
   .overlay { padding: var(--s3); }
   .modal { padding: var(--s5) var(--s4); max-height: calc(100vh - 24px); }
   .toast { width: 88%; text-align: center; }
-  .feature-grid, .steps, .landing-cols { grid-template-columns: 1fr; }
+  .feature-grid, .steps, .landing-cols, .bench { grid-template-columns: 1fr; }
   .msg { max-width: 94%; }
 }
 

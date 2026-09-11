@@ -4,7 +4,7 @@
 resultado, não antes, então o git não prova a ordem. Fica registrado aqui para
 não parecer o que não é. O ponto continua: as métricas e as colunas de controle
 (moeda, oráculo) foram decididas antes de haver número pra olhar, e os desvios
-do plano estão listados em [`RESULTS.md`](RESULTS.md).
+do plano estão listados em [`README.md`](README.md).
 
 ## A pergunta
 
@@ -90,7 +90,7 @@ Declarado antes, pra não virar desculpa depois:
 
 ## Como será reportado
 
-Os `.jsonl` brutos vão versionados junto com o `RESULTS.md`, então qualquer um
+Os `.jsonl` brutos vão versionados junto com o `README.md`, então qualquer um
 refaz o `score.py` e confere sem rodar modelo nenhum.
 
 **Resultado negativo é publicado.** Se o juiz de 0.6B empatar com a moeda, ou se

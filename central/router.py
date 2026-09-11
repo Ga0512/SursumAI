@@ -14,7 +14,7 @@ CONFIRMATIONS = 2
 # spend tokens before they answer, and those count against max_tokens: at the
 # old 120 a thinking judge could return an empty verdict, which the router reads
 # as "do not escalate" — the router would quietly never route. The benchmark
-# (bench/RESULTS.md) measured the judge at 1024; production now matches it.
+# (bench/README.md) measured the judge at 1024; production now matches it.
 JUDGE_MAX_TOKENS = 1024
 JUDGE_TIMEOUT = 120.0
 
