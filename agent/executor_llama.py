@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import functools
 import json
 import os
 import platform
@@ -100,7 +101,12 @@ def _log(deploy_id: str, line: str) -> None:
         f.write(line.rstrip() + "\n")
 
 
+@functools.lru_cache(maxsize=1)
 def _gpu_available() -> bool:
+    """Is there an NVIDIA GPU? Asked once per process: one deploy asks it from
+    the preflight, the image choice and the command line, and nvidia-smi can
+    take seconds to answer (or the full timeout when it hangs). A GPU does not
+    appear mid-run; restarting the agent picks up a newly installed driver."""
     try:
         result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=10)
         return result.returncode == 0

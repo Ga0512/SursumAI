@@ -7,3 +7,8 @@
 *.svg text eol=lf
 sursumai/bin/sursumai text eol=lf
 *.sh text eol=lf
+
+# Not part of what the installer ships: the public website is hosted on its
+# own, and the benchmark's raw runs are for readers of the repository.
+site/ export-ignore
+bench/ export-ignore

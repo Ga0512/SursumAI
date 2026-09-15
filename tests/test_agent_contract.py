@@ -199,7 +199,8 @@ def test_llama_reads_its_key_from_a_file_not_from_argv():
     ):
         assert "sk-sursum-test" not in " ".join(cmd)
         assert "--api-key-file" in cmd
-    executor_llama.stop(DEPLOY_ID)
+    # only the key file needs cleaning up; stop() would shell out to docker
+    executor_llama._remove_key_file(DEPLOY_ID)
 
 
 def test_the_agent_reports_whether_auth_is_really_enforced(client, monkeypatch):

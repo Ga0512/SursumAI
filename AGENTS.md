@@ -105,6 +105,7 @@ python -m pytest tests/test_spec.py::test_defaults_are_valid   # um teste só
 - SQLite com `check_same_thread=False` + WAL (precisa, central usa threads para `agent_client`).
 - Reconcile contínuo no central: `_reconcile_loop` a cada 10s (healthy→failed se processo morre) + reconcile no startup (cobre provisioning/redeploying órfãos).
 - Token bearer: usar `HTTPBearer` (FastAPI) — header é `Authorization`, não `X-Auth`.
+- `site/` é o site público (landing + preços), hospedado à parte e fora do tarball; o app em `localhost:3000` abre direto no login.
 - URL que o usuário copia (snippets, Base URL, curl) é absoluta e `/v1`: `publicBaseUrl()`, nunca `API` (relativo) nem `/deploys/{id}/chat` (recusa API key). Resposta direta de deploy volta com `model` = `spec.model`, não o caminho do GGUF.
 - UI sem enchimento: sem preflight em card saudável, sem quadrado "—" para métrica que o runtime não exporta, reasoning recolhido, pool com estado real, modal de pool do menor para o maior modelo (ver CLAUDE.md).
 - README/docs e mensagens de commit em português (pt-BR).

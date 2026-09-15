@@ -79,7 +79,7 @@ async function submitAuth() {
 function logout() {
   fetch(`${API}/auth/logout`, { method: "POST", headers: authHeaders() }).catch(() => {});
   clearSession();
-  showView("landing");
+  showView("login");
   document.getElementById("auth_email").value = "";
   document.getElementById("auth_password").value = "";
   authMode = "login";
@@ -119,11 +119,15 @@ async function applyUpdate() {
 }
 
 function restoreSession() {
-  if (!getToken()) return;
+  // Whoever opens localhost already installed SursumAI, so there is nothing
+  // to sell them: no token means the login form, and a stored session shows
+  // the dashboard at once instead of flashing the form while /auth/me answers.
+  if (!getToken()) { showView("login"); return; }
+  showView("dashboard");
   fetch(`${API}/auth/me`, { headers: authHeaders() })
     .then((r) => (r.ok ? r.json() : null))
     .then((user) => {
-      if (!user) { clearSession(); showView("landing"); return; }
+      if (!user) { clearSession(); showView("login"); return; }
       const u = document.getElementById("userName");
       u.textContent = user.name || user.email;
       u.classList.remove("hidden");
@@ -135,7 +139,7 @@ function restoreSession() {
     .catch(() => {});
 }
 
-const VIEWS = ["landing", "login", "dashboard"];
+const VIEWS = ["login", "dashboard"];
 function showView(name) {
   VIEWS.forEach((v) => document.getElementById(v).classList.toggle("hidden", v !== name));
 }
@@ -145,30 +149,6 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2500);
-}
-
-const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.4/install.sh | bash";
-
-function copyInstall() {
-  const btn = document.querySelector(".install-copy");
-  const done = () => {
-    if (btn) btn.textContent = "Copied!";
-    setTimeout(() => { if (btn) btn.textContent = "Copy"; }, 2000);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(INSTALL_CMD).then(done).catch(() => fallbackCopy(done));
-  } else {
-    fallbackCopy(done);
-  }
-}
-
-function fallbackCopy(done) {
-  const ta = document.createElement("textarea");
-  ta.value = INSTALL_CMD;
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand("copy"); done(); } catch {}
-  document.body.removeChild(ta);
 }
 
 /* ---- model provider picker (Bedrock-style) ---- */
