@@ -25,11 +25,12 @@ function fallbackCopy(done) {
 }
 
 /* The hero types through the models SursumAI can run, with each model's logo.
-   One name is not the point — the point is that it is your pick, on your box. */
+   Family names only, never versions: "Qwen3" is wrong the week Qwen4 lands, and
+   the point is not one model anyway — it is that the pick is yours. */
 const HERO_MODELS = [
-  { name: "Qwen3", logo: "https://avatars.githubusercontent.com/u/141221163?s=80" },
-  { name: "DeepSeek-R1", logo: "https://avatars.githubusercontent.com/u/148330874?s=80" },
-  { name: "Kimi K2", logo: "https://avatars.githubusercontent.com/u/129152888?s=80" },
+  { name: "Qwen", logo: "https://avatars.githubusercontent.com/u/141221163?s=80" },
+  { name: "DeepSeek", logo: "https://avatars.githubusercontent.com/u/148330874?s=80" },
+  { name: "Kimi", logo: "https://avatars.githubusercontent.com/u/129152888?s=80" },
   { name: "Mistral", logo: "https://avatars.githubusercontent.com/u/132372032?s=80" },
   { name: "Muse-Glimmer", logo: "https://avatars.githubusercontent.com/u/153379578?s=80" },
   { name: "your fine-tune", logo: "" },
