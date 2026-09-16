@@ -17,8 +17,8 @@
 ## Estado atual
 
 - SursumAI rodando como **3 processos separados** (arquitetura do ROADMAP.md): Web (3000), Backend Central (8001), Local Agent (8010).
-- `qwen-vllm/`, `qwen-hf/`, `qwen-ollama/` e os entrypoints `api_server.py`/`handler.py`/Dockerfiles **não fazem mais parte do produto** (ficaram no histórico; `requirements.txt` ainda tem runpod para driver futuro).
-- Testes com pytest em `tests/` (`python -m pytest`, 250 casos) + CI no GitHub Actions. Não há linter nem typecheck de Python.
+- `qwen-vllm/`, `qwen-hf/`, `qwen-ollama/` e os entrypoints `api_server.py`/`handler.py`/Dockerfiles **não fazem mais parte do produto** — foram removidos, existem só no histórico do git.
+- Testes com pytest em `tests/` (`python -m pytest`, 311 casos) + CI no GitHub Actions. Não há linter nem typecheck de Python.
 - **Auth real**: email+senha com PBKDF2, sessões/tokens bearer. `user_id` é o ponto em comum de todos os dados (deploys/métricas).
 - **API 100% default (não-negociável)**: não mexer no thinking do modelo — sem `enable_thinking:false` default. Reasoning/thinking é parte de `completion_tokens` e conta (verificado empiricamente: delta do gauge == `usage.completion_tokens`). Qwen3.5 pode gastar todo o contexto em reasoning (`content` vazio, `finish:length`) — aceito.
 - **Detail modal (RunPod-style)** com 3 abas: Metrics (grid com sparkline; llama mostra "—" em requests/failed/KV/TTFT/latency pois llama.cpp não expõe), Test (playground dark com `reasoning_content` colapsado + content + meta de uso), Code (snippets Python/JS/curl). Card clicável + botão Details.
@@ -98,7 +98,7 @@ python -m pytest tests/test_spec.py::test_defaults_are_valid   # um teste só
 - Logs dos processos: `/tmp/opencode/{agent,central,web}.log`.
 - Porta 8000 pertence a **outro projeto** (`omnihunter-process-images`) — NÃO usar 8000.
 - `sursumai.db` + `sursumai-logs/` são ignorados pelo git (.gitignore).
-- vLLM vem da imagem docker; **não** está em `requirements.txt` (fastapi, uvicorn, huggingface_hub, python-dotenv — todos pinados com `==`). `runpod` foi removido (não era usado).
+- vLLM vem da imagem docker; **não** está em `requirements.txt` (fastapi, uvicorn, huggingface_hub, python-dotenv — todos pinados com `==`).
 
 ## Peculiaridades
 
