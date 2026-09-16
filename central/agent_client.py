@@ -7,6 +7,9 @@ import urllib.request
 
 from core import keys
 
+# The agent on this machine. Every call also takes `agent=<url>`: a deploy can
+# live on another machine, and the central is the only process that knows which
+# one. Nothing chooses a different agent yet — this is the seam for it.
 AGENT_URL = os.environ.get("AGENT_URL", "http://localhost:8010")
 AGENT_KEY = keys.load_or_create_agent_key()
 
@@ -19,7 +22,9 @@ CHAT_TIMEOUT = float(os.environ.get("SURSUMAI_CHAT_TIMEOUT", 900))
 
 def _is_timeout(e: BaseException) -> bool:
     reason = getattr(e, "reason", e)
-    return isinstance(e, TimeoutError) or isinstance(reason, TimeoutError)         or "timed out" in str(e)
+    return (isinstance(e, TimeoutError)
+            or isinstance(reason, TimeoutError)
+            or "timed out" in str(e))
 
 
 def _unreachable(endpoint: str, e: BaseException, timeout: float) -> str:
@@ -36,8 +41,10 @@ class AgentError(Exception):
     pass
 
 
-def _request(method: str, path: str, body: dict | None = None, timeout: float = 30.0) -> dict:
-    url = AGENT_URL.rstrip("/") + path
+def _request(method: str, path: str, body: dict | None = None, timeout: float = 30.0,
+             agent: str | None = None) -> dict:
+    base = (agent or AGENT_URL).rstrip("/")
+    url = base + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
@@ -52,36 +59,36 @@ def _request(method: str, path: str, body: dict | None = None, timeout: float = 
             detail = ""
         raise AgentError(f"agent {method} {path}: HTTP {e.code} {detail}") from None
     except (urllib.error.URLError, OSError) as e:
-        raise AgentError(f"agent unreachable at {AGENT_URL}: {e}") from None
+        raise AgentError(f"agent unreachable at {base}: {e}") from None
 
 
-def start(deploy_id: str, spec: dict) -> dict:
-    return _request("POST", "/deploys", {"deploy_id": deploy_id, "spec": spec})
+def start(deploy_id: str, spec: dict, agent: str | None = None) -> dict:
+    return _request("POST", "/deploys", {"deploy_id": deploy_id, "spec": spec}, agent=agent)
 
 
-def preflight(spec: dict) -> dict:
-    return _request("POST", "/preflight", {"spec": spec}, timeout=60.0)
+def preflight(spec: dict, agent: str | None = None) -> dict:
+    return _request("POST", "/preflight", {"spec": spec}, timeout=60.0, agent=agent)
 
 
-def status(deploy_id: str) -> dict:
-    return _request("GET", f"/deploys/{deploy_id}/status")
+def status(deploy_id: str, agent: str | None = None) -> dict:
+    return _request("GET", f"/deploys/{deploy_id}/status", agent=agent)
 
 
-def capabilities() -> dict:
-    return _request("GET", "/capabilities")
+def capabilities(agent: str | None = None) -> dict:
+    return _request("GET", "/capabilities", agent=agent)
 
 
-def model_fit(model: str, runtime: str) -> dict:
+def model_fit(model: str, runtime: str, agent: str | None = None) -> dict:
     from urllib.parse import quote
-    return _request("GET", f"/model_fit?model={quote(model)}&runtime={runtime}")
+    return _request("GET", f"/model_fit?model={quote(model)}&runtime={runtime}", agent=agent)
 
 
-def logs(deploy_id: str, tail: int = 300) -> str:
-    return _request("GET", f"/deploys/{deploy_id}/logs?tail={tail}").get("logs", "")
+def logs(deploy_id: str, tail: int = 300, agent: str | None = None) -> str:
+    return _request("GET", f"/deploys/{deploy_id}/logs?tail={tail}", agent=agent).get("logs", "")
 
 
-def metrics(deploy_id: str) -> dict:
-    return _request("GET", f"/deploys/{deploy_id}/metrics")
+def metrics(deploy_id: str, agent: str | None = None) -> dict:
+    return _request("GET", f"/deploys/{deploy_id}/metrics", agent=agent)
 
 
 def chat(endpoint: str, payload: dict, timeout: float | None = None,
@@ -135,5 +142,5 @@ def chat_stream(endpoint: str, payload: dict, timeout: float | None = None,
         yield f'data: {json.dumps({"error": _unreachable(endpoint, e, timeout)})}\n\n'.encode()
 
 
-def stop(deploy_id: str) -> None:
-    _request("POST", f"/deploys/{deploy_id}/stop")
+def stop(deploy_id: str, agent: str | None = None) -> None:
+    _request("POST", f"/deploys/{deploy_id}/stop", agent=agent)

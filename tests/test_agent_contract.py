@@ -249,3 +249,34 @@ def test_the_agent_reports_whether_auth_is_really_enforced(client, monkeypatch):
     assert body["auth_enforced"] is True
 
     agent_app.SPECS.pop(DEPLOY_ID, None)
+
+
+def test_a_call_can_name_which_agent_it_goes_to(monkeypatch):
+    """The central is the only process that knows where a deploy lives. Every
+    agent call takes the agent's URL, defaulting to the one on this machine —
+    the seam a second machine plugs into."""
+    from central import agent_client
+
+    seen = []
+
+    class _Resp:
+        def read(self):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _urlopen(req, timeout=None):
+        seen.append(req.full_url)
+        return _Resp()
+
+    monkeypatch.setattr(agent_client.urllib.request, "urlopen", _urlopen)
+
+    agent_client.status("d1")
+    assert seen[-1].startswith(agent_client.AGENT_URL)
+
+    agent_client.status("d1", agent="http://10.0.0.7:8010/")
+    assert seen[-1] == "http://10.0.0.7:8010/deploys/d1/status"
