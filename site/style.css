@@ -1095,3 +1095,50 @@ a.btn { text-decoration: none; }
   .plans { grid-template-columns: 1fr; }
   .site-links .btn-ghost { display: none; }
 }
+
+/* --- hero rotator ------------------------------------------------------ */
+.rotator {
+  display: inline-flex; align-items: center; gap: 0.25em;
+  vertical-align: baseline;
+}
+.rotator-logo {
+  width: 0.78em; height: 0.78em;
+  border-radius: 0.18em;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--border);
+  animation: pop 0.4s ease;
+}
+.rotator-name {
+  background: linear-gradient(95deg, var(--accent), #9b7bff 60%, var(--accent));
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  white-space: nowrap;
+}
+.caret {
+  display: inline-block; width: 3px; height: 0.9em;
+  background: var(--accent); border-radius: 2px;
+  animation: blink 1s step-end infinite;
+}
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } }
+
+/* the hero holds two lines whatever the model's name length */
+.hero h1 { min-height: 2.2em; }
+
+/* --- cards lift a little on the public site (not in the app) ----------- */
+.feature, .step, .landing-col, .plan {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.feature:hover, .step:hover, .landing-col:hover, .plan:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
+}
+.plan-pro:hover { box-shadow: var(--ring), var(--shadow-lg); }
+
+/* --- sections fade in as they come into view --------------------------- */
+.reveal { opacity: 0; transform: translateY(14px); }
+.reveal.seen { opacity: 1; transform: none; transition: opacity 0.5s ease, transform 0.5s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal.seen { opacity: 1; transform: none; }
+  .rotator-logo { animation: none; }
+}
