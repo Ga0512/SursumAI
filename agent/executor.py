@@ -49,7 +49,7 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--name", f"deploy-{deploy_id[:12]}",
         "--runtime", "nvidia", "--gpus", "all",
         "--ipc", "host",
-        "-p", f"{port}:8000",
+        "-p", f"{ports.bind_host()}:{port}:8000",
     ]
     # `-e NAME` with no value: docker forwards it from our environment, so the
     # secret never lands in an argument list (see runtime_env)

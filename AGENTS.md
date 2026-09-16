@@ -26,7 +26,7 @@
 
 ## Segurança (não regredir)
 
-- **Bind em `127.0.0.1` por padrão** nos 3 processos. Rede só via `SURSUMAI_BIND`
+- **Bind em `127.0.0.1` por padrão** nos 3 processos **e nas portas dos deploys** (`ports.bind_host()`). Rede só via `SURSUMAI_BIND`
   (`start.sh`, `web/server.py`, CLI). Nunca voltar `0.0.0.0` como default.
 - **`AGENT_KEY`** vem de `core/keys.py`: gerada aleatória no 1º run em
   `~/.sursumai/agent.key` (0600), compartilhada por central e agent. `AGENT_KEY`

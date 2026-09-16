@@ -287,7 +287,7 @@ def test_the_binary_command_binds_the_allocated_port(paths):
 
 def test_the_docker_command_maps_the_allocated_port(paths):
     cmd = ex._docker_build_cmd(_spec(port=9042), "id", paths)
-    assert "9042:8080" in cmd
+    assert cmd[cmd.index("-p") + 1].endswith(":9042:8080")
 
 
 def test_metrics_are_always_enabled(paths):
@@ -462,3 +462,34 @@ def test_the_host_prompt_cache_is_bounded(paths, monkeypatch, gpu):
                 ex._binary_build_cmd(_spec(), "id", paths, "llama-server")):
         mib = int(cmd[cmd.index("--cache-ram") + 1])
         assert 256 <= mib <= 2048
+
+
+@pytest.mark.parametrize("gpu", [True, False])
+def test_the_model_port_is_not_published_to_the_network(paths, monkeypatch, gpu):
+    """A deploy's port used to be published on 0.0.0.0 — on a cloud VM that is
+    the public internet, with only the deploy's key in front of the model. It
+    follows the same rule as the rest of SursumAI: loopback unless the operator
+    opts in with SURSUMAI_BIND (and some hosts refuse a 0.0.0.0 bind outright)."""
+    monkeypatch.setattr(ex, "_gpu_available", lambda: gpu)
+    monkeypatch.delenv("SURSUMAI_BIND", raising=False)
+
+    cmd = ex._binary_build_cmd(_spec(), "id", paths, "llama-server")
+    assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
+
+    published = ex._docker_build_cmd(_spec(), "id", paths)[
+        ex._docker_build_cmd(_spec(), "id", paths).index("-p") + 1]
+    assert published.startswith("127.0.0.1:")
+
+    monkeypatch.setenv("SURSUMAI_BIND", "0.0.0.0")
+    assert ex._binary_build_cmd(_spec(), "id", paths, "llama-server")[
+        ex._binary_build_cmd(_spec(), "id", paths, "llama-server").index("--host") + 1] == "0.0.0.0"
+    cmd = ex._docker_build_cmd(_spec(), "id", paths)
+    assert cmd[cmd.index("-p") + 1].startswith("0.0.0.0:")
+
+
+def test_the_vllm_container_publishes_on_loopback_too(monkeypatch):
+    from agent import executor
+
+    monkeypatch.delenv("SURSUMAI_BIND", raising=False)
+    cmd = executor.build_cmd(_spec(), "id")
+    assert cmd[cmd.index("-p") + 1].startswith("127.0.0.1:")

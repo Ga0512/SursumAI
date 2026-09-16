@@ -606,7 +606,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", _docker_name(deploy_id),
-        "-p", f"{port}:8080",
+        "-p", f"{ports.bind_host()}:{port}:8080",
         "-v", f"{model_dir}:/models:ro",
     ]
     if on_gpu:
@@ -617,7 +617,7 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
     cmd += [
         IMAGE_CUDA if on_gpu else IMAGE,
         "--model", f"/models/{Path(paths['gguf']).name}",
-        "--host", "0.0.0.0",
+        "--host", "0.0.0.0",          # inside the container; the -p above is what is published
         "--port", "8080",
         "--ctx-size", str(max(spec.max_model_len, 128)),
         "-n", str(spec.max_tokens),
@@ -645,7 +645,7 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
     cmd = [
         exe,
         "--model", paths["gguf"],
-        "--host", "0.0.0.0",
+        "--host", ports.bind_host(),
         "--port", str(port),
         "--ctx-size", str(max(spec.max_model_len, 128)),
         "-n", str(spec.max_tokens),

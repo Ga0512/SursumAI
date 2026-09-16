@@ -123,7 +123,7 @@ Quatro segredos, quatro donos:
 
 ### Bind
 
-Os 3 processos escutam em `127.0.0.1`. Exposição na rede é opt-in por `SURSUMAI_BIND` (respeitado por `start.sh`, `web/server.py` e o CLI). Nunca voltar `0.0.0.0` como default.
+Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. Exposição na rede é opt-in por `SURSUMAI_BIND` (respeitado por `start.sh`, `web/server.py`, o CLI e `ports.bind_host()`, que os executores usam no `--host` do llama e no `-p` do docker). Nunca voltar `0.0.0.0` como default: a porta do modelo publicada em `0.0.0.0` deixava o modelo na internet de qualquer VM com IP público, com a chave do deploy como única barreira — e em alguns hosts o bind em `0.0.0.0` é recusado e o servidor nem sobe.
 
 ## Peculiaridades
 

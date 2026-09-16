@@ -15,6 +15,7 @@ port they are actually listening on.
 from __future__ import annotations
 
 import hashlib
+import os
 import socket
 import time
 
@@ -81,3 +82,15 @@ def first_free(taken: set[int]) -> int:
         f"all {len(PORT_RANGE)} deploy ports ({PORT_MIN}-{PORT_MAX}) are in use — "
         "destroy a deployment before creating another one"
     )
+
+
+def bind_host() -> str:
+    """Interface a model server should listen on.
+
+    Same rule as the three SursumAI processes: loopback unless the operator
+    asks for the network with SURSUMAI_BIND. Model ports used to be published
+    on 0.0.0.0 regardless, which put the model on the public internet of any
+    cloud VM — the deploy's key was the only thing in front of it. It also
+    failed outright on hosts that refuse a 0.0.0.0 bind.
+    """
+    return os.environ.get("SURSUMAI_BIND", "127.0.0.1")

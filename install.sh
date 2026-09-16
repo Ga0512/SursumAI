@@ -201,6 +201,11 @@ ok "Environment ready."
 # --- docker (optional) ----------------------------------------------------------
 # Docker unlocks the GPU (vLLM and llama.cpp with CUDA). Without it, SursumAI
 # still works on CPU. We ask and install automatically when possible.
+
+has_nvidia() {
+  command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1
+}
+
 ensure_docker() {
   docker_running && return 0
   if command -v docker >/dev/null 2>&1; then
@@ -210,13 +215,19 @@ ensure_docker() {
   fi
 
   echo
-  echo "Docker is not installed. It is optional: without it SursumAI runs models"
-  echo "on CPU (slower) and won't use your NVIDIA GPU. With it, the GPU is used."
+  echo "Docker is not installed. It is optional."
+  if has_nvidia; then
+    echo "You have an NVIDIA GPU: without Docker, SursumAI runs llama-server with"
+    echo "a native CUDA build and still uses the GPU. Docker adds vLLM, which is"
+    echo "faster under real traffic."
+  else
+    echo "Without it, SursumAI runs models on the CPU, which works everywhere."
+  fi
   printf "Install Docker now? [y/N] "
   read -r ans
   case "$ans" in
     y|Y|yes|YES) ;;
-    *) echo "Ok — continuing without Docker (CPU). You can install it later."; return 1 ;;
+    *) echo "Ok — continuing without Docker. You can install it later."; return 1 ;;
   esac
 
   if [ "$IS_WSL" -eq 1 ] || [ -n "$(command -v apt-get)" ]; then
@@ -331,5 +342,12 @@ fi
 
 echo
 ok "Installation complete. Next steps:"
-echo "  • Terminal:  sursumai status"
-echo "  • Icon:      SursumAI in the applications menu"
+# `sursumai` was linked into a directory this shell may not have on its PATH
+# yet: the rc file is only read by new shells, and a server has no menu.
+if command -v sursumai >/dev/null 2>&1; then
+  echo "  • Terminal:  sursumai status"
+else
+  echo "  • This shell: export PATH=\"$BIN_DIR:\$PATH\"   (new terminals have it already)"
+  echo "  • Or run:     $BIN_DIR/sursumai status"
+fi
+[ -d "$HOME/.local/share/applications" ] && echo "  • Icon:      SursumAI in the applications menu"

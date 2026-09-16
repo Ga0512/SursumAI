@@ -427,9 +427,10 @@ Service logs live in `/tmp/opencode/{agent,central,web}.log`; deployment logs in
 
 SursumAI is a local app and is built to stay that way.
 
-- **Loopback by default.** The three services listen on `127.0.0.1`. To reach
-  them from another machine you have to opt in explicitly, with
-  `SURSUMAI_BIND=0.0.0.0`.
+- **Loopback by default.** The three services *and every model port* listen on
+  `127.0.0.1`. To reach them from another machine you have to opt in
+  explicitly, with `SURSUMAI_BIND=0.0.0.0`. On a cloud VM that difference is
+  the public internet.
 - **A private agent key.** On first run a random key is generated in
   `~/.sursumai/agent.key` (readable only by you) and shared by the central and
   the agent. If you bind to the network while still on the built-in development
