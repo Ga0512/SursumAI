@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.8.7}"
+SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.8.8}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
 RELEASE_BASE="https://github.com/$SURSUMAI_REPO/releases/download/$SURSUMAI_VERSION"
@@ -272,6 +272,14 @@ fi
 export PATH="$BIN_DIR:$PATH"
 ok "Command 'sursumai' on PATH ($BIN_DIR)."
 
+# A machine added from another SursumAI stops here: a server has no desktop to
+# put an icon on, and whoever added it still has to hand it the agent key — an
+# agent started before that would make up a key of its own and refuse every call.
+if [ "${SURSUMAI_AGENT_ONLY:-0}" = "1" ]; then
+  ok "Installed (agent only). It is started over SSH by the machine that added it."
+  exit 0
+fi
+
 # --- desktop icon ---------------------------------------------------------------
 ICON_SRC="$SURSUMAI_DIR/assets/sursumai-logo.svg"
 
@@ -301,7 +309,13 @@ EOF
 
 elif [ "$IS_WSL" -eq 1 ]; then
   # shortcut on the Windows Desktop
-  WIN_PROFILE="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r' | sed 's/ *$//')"
+  # cmd.exe is only on the PATH when Windows interop is on — not over SSH, not
+  # with interop disabled. Under `set -e` a missing one killed the installer
+  # right here with exit 127 and not a word printed. The shortcut is a nicety.
+  WIN_PROFILE=""
+  if command -v cmd.exe >/dev/null 2>&1; then
+    WIN_PROFILE="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r' | sed 's/ *$//' || true)"
+  fi
   if [ -n "$WIN_PROFILE" ]; then
     DESKTOP="$(wslpath -u "$WIN_PROFILE\\Desktop")" 2>/dev/null || DESKTOP=""
     if [ -n "$DESKTOP" ] && [ -d "$DESKTOP" ]; then
@@ -337,14 +351,6 @@ EOF
 fi
 
 # --- launch -----------------------------------------------------------------------
-# A machine added from another SursumAI stops here: whoever added it still has
-# to hand it the agent key, and an agent started before that would make up a
-# key of its own and refuse every call.
-if [ "${SURSUMAI_AGENT_ONLY:-0}" = "1" ]; then
-  ok "Installed (agent only). It is started over SSH by the machine that added it."
-  exit 0
-fi
-
 echo
 ensure_docker || true
 bold "Starting SursumAI…"
