@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.8.8}"
+SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.8.9}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
 RELEASE_BASE="https://github.com/$SURSUMAI_REPO/releases/download/$SURSUMAI_VERSION"
@@ -148,6 +148,9 @@ else
   trap 'rm -rf "$TMP"' EXIT
   curl -fsSL "$SURSUMAI_TARBALL_URL" -o "$TMP/sursumai.tar.gz" \
     || fail "failed to download $SURSUMAI_TARBALL_URL"
+  # Before a single byte is extracted. This function existed for months without
+  # ever being called, while the README and every release note promised it ran.
+  verify_checksum "$TMP/sursumai.tar.gz"
   mkdir -p "$TMP/src"
   tar -xzf "$TMP/sursumai.tar.gz" -C "$TMP/src"
   # GitHub tarballs include a root dir (e.g. sursumai-1.0) — normalize it

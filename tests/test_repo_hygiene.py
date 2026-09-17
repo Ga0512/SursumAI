@@ -124,3 +124,25 @@ def test_dependency_install_is_not_silent():
 
 def test_the_project_ships_a_license():
     assert (ROOT / "LICENSE").read_text(encoding="utf-8").strip()
+
+
+def _shell_calls(script: str, function: str) -> int:
+    """Lines that call a shell function, not counting its definition or comments."""
+    text = (ROOT / script).read_text()
+    return sum(1 for line in text.splitlines()
+               if function in line
+               and not line.lstrip().startswith("#")
+               and f"{function}()" not in line)
+
+
+def test_the_installer_really_verifies_the_download():
+    """verify_checksum was defined and never called for months, while the README
+    and every release note said the tarball was checked before installing."""
+    assert _shell_calls("install.sh", "verify_checksum") >= 1
+
+
+def test_the_windows_shortcut_cannot_kill_the_installer():
+    """Without Windows interop (an SSH session, interop turned off) cmd.exe is
+    not on the PATH, and under set -e calling it ended the install silently."""
+    text = (ROOT / "install.sh").read_text()
+    assert "command -v cmd.exe" in text
