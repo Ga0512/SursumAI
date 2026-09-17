@@ -29,6 +29,11 @@ if [ ! -x "$PY" ]; then
   bash "$ROOT/setup.sh"
 fi
 
+# A machine added over SSH runs the agent and nothing else: the dashboard, the
+# database and the decisions stay on the user's own machine, and the agent
+# there is reached only through the SSH tunnel.
+AGENT_ONLY="${SURSUMAI_AGENT_ONLY:-0}"
+
 pkill -f "uvicorn agent.app" 2>/dev/null || true
 pkill -f "uvicorn central.app" 2>/dev/null || true
 pkill -f "web/server.py" 2>/dev/null || true
@@ -37,6 +42,14 @@ sleep 1
 echo "Starting Agent (8010)..."
 setsid nohup "$PY" -m uvicorn agent.app:app --host "$SURSUMAI_BIND" --port 8010 \
   >> "$LOGDIR/agent.log" 2>&1 &
+
+if [ "$AGENT_ONLY" = "1" ]; then
+  sleep 2
+  echo "---"
+  echo "Agent only: http://127.0.0.1:8010 (reachable through the SSH tunnel)"
+  echo "Logs:       $LOGDIR/agent.log"
+  exit 0
+fi
 
 echo "Starting Central (8001)..."
 setsid nohup "$PY" -m uvicorn central.app:app --host "$SURSUMAI_BIND" --port 8001 \

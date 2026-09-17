@@ -223,8 +223,15 @@ ensure_docker() {
   else
     echo "Without it, SursumAI runs models on the CPU, which works everywhere."
   fi
+  # `curl | bash` feeds this script on stdin, so a plain `read` would swallow
+  # the next line of the script as the answer. Ask the terminal instead, and
+  # with no terminal at all (an SSH-driven install) take the default: no.
+  if ! { : </dev/tty; } 2>/dev/null; then
+    echo "No terminal to ask on — continuing without Docker."
+    return 1
+  fi
   printf "Install Docker now? [y/N] "
-  read -r ans
+  read -r ans </dev/tty
   case "$ans" in
     y|Y|yes|YES) ;;
     *) echo "Ok — continuing without Docker. You can install it later."; return 1 ;;
@@ -330,6 +337,14 @@ EOF
 fi
 
 # --- launch -----------------------------------------------------------------------
+# A machine added from another SursumAI stops here: whoever added it still has
+# to hand it the agent key, and an agent started before that would make up a
+# key of its own and refuse every call.
+if [ "${SURSUMAI_AGENT_ONLY:-0}" = "1" ]; then
+  ok "Installed (agent only). It is started over SSH by the machine that added it."
+  exit 0
+fi
+
 echo
 ensure_docker || true
 bold "Starting SursumAI…"
