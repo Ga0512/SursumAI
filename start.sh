@@ -35,8 +35,12 @@ fi
 AGENT_ONLY="${SURSUMAI_AGENT_ONLY:-0}"
 
 pkill -f "uvicorn agent.app" 2>/dev/null || true
-pkill -f "uvicorn central.app" 2>/dev/null || true
-pkill -f "web/server.py" 2>/dev/null || true
+if [ "$AGENT_ONLY" != "1" ]; then
+  # only the agent is ours to restart on a machine someone added over SSH —
+  # it may run its own SursumAI dashboard, and that must keep running
+  pkill -f "uvicorn central.app" 2>/dev/null || true
+  pkill -f "web/server.py" 2>/dev/null || true
+fi
 sleep 1
 
 echo "Starting Agent (8010)..."
@@ -44,11 +48,20 @@ setsid nohup "$PY" -m uvicorn agent.app:app --host "$SURSUMAI_BIND" --port 8010 
   >> "$LOGDIR/agent.log" 2>&1 &
 
 if [ "$AGENT_ONLY" = "1" ]; then
-  sleep 2
-  echo "---"
-  echo "Agent only: http://127.0.0.1:8010 (reachable through the SSH tunnel)"
-  echo "Logs:       $LOGDIR/agent.log"
-  exit 0
+  # Whoever started this is a program on another machine, reading only the
+  # exit code and the last line. Say whether the agent really came up, and if
+  # not, the log line that explains why.
+  for _ in $(seq 1 40); do
+    if curl -sf http://127.0.0.1:8010/health >/dev/null 2>&1; then
+      echo "Agent only: http://127.0.0.1:8010 (reachable through the SSH tunnel)"
+      echo "Logs:       $LOGDIR/agent.log"
+      exit 0
+    fi
+    sleep 0.5
+  done
+  echo "The agent did not start. Last lines of $LOGDIR/agent.log:" >&2
+  tail -n 5 "$LOGDIR/agent.log" >&2
+  exit 1
 fi
 
 echo "Starting Central (8001)..."

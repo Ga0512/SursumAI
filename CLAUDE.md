@@ -55,7 +55,7 @@ web/server.py (3000, estático + proxy /api) ──► central/app.py (8001) ─
 - **Central (8001)** — dono do DB, auth, métricas e decisões. Nunca executa processo de modelo; fala com o agent por `central/agent_client.py` (header `X-Agent-Key`).
 - **Agent (8010)** — só executa. Escolhe o executor por `spec.runtime` (`vllm` | `llama`). Autentica com `X-Agent-Key` (ver *Auth e segredos*).
 - **Web (3000)** — `http.server` estático com proxy `/api` para o central; `web/app.js` (vanilla, sem build) guarda o token em `localStorage` (`sg_token`).
-- **Site público (`site/`)** — landing, preços (Free / Pro $15) e instalação, hospedado à parte (Cloudflare Pages, Vercel). **Não** faz parte do app: o `localhost:3000` abre direto no login, porque quem abre ele já instalou. `site/` e `bench/` têm `export-ignore` e não vão no tarball do release.
+- **Site público (`site/`)** — landing, preços (Free / Pro $99, pagamento único) e instalação, hospedado à parte (Cloudflare Pages, Vercel). **Não** faz parte do app: o `localhost:3000` abre direto no login, porque quem abre ele já instalou. `site/` e `bench/` têm `export-ignore` e não vão no tarball do release.
 - **`core/spec.py`** — `Spec` é o contrato central/agent: valida runtime, portas 9000-9099, gpu_memory_utilization, etc. Trafega como dict (`to_dict`/`from_dict`) em toda chamada de deploy.
 
 ### Ciclo de vida de um deploy
