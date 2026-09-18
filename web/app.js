@@ -70,6 +70,7 @@ async function submitAuth() {
     showView("dashboard");
     loadDeploys();
     checkUpdate();
+    loadLicense();
     if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
   } catch {
     toast("Could not reach server");
@@ -134,6 +135,7 @@ function restoreSession() {
       showView("dashboard");
       loadDeploys();
       checkUpdate();
+      loadLicense();
       if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
     })
     .catch(() => {});
@@ -1611,3 +1613,103 @@ function stopChat() {
 
 /* ---- init ---- */
 restoreSession();
+
+/* ---- Pro licence ----
+   Free and Pro are the same download. A signed key, bought once, turns the Pro
+   features on for this machine; the check is offline, so nothing here depends
+   on our servers being up. */
+
+// Where "Buy" goes. Replaced by the real Stripe Payment Link at release.
+const PRO_BUY_URL = "";
+
+let licenseState = { pro: false };
+
+async function loadLicense() {
+  try {
+    const res = await fetch(`${API}/meta/license`, { headers: authHeaders() });
+    if (res.ok) licenseState = await res.json();
+  } catch {}
+  renderLicense();
+  return licenseState;
+}
+
+function renderLicense() {
+  const btn = document.getElementById("proBtn");
+  if (!btn) return;
+  btn.textContent = licenseState.pro ? "Pro" : "Upgrade to Pro";
+  btn.classList.toggle("btn-pro-active", !!licenseState.pro);
+  document.getElementById("upgradeOffer").classList.toggle("hidden", !!licenseState.pro);
+  document.getElementById("upgradeActive").classList.toggle("hidden", !licenseState.pro);
+  if (licenseState.pro) {
+    document.getElementById("upgradeTitle").textContent = "SursumAI Pro";
+    document.getElementById("upgradeSub").textContent =
+      "Thank you — Machines is in the tabs above.";
+    document.getElementById("licensedTo").textContent =
+      `Licensed to ${licenseState.email || "you"}.`;
+  }
+  const buy = document.getElementById("upgradeBuy");
+  if (PRO_BUY_URL) {
+    buy.href = PRO_BUY_URL;
+    buy.classList.remove("disabled");
+  } else {
+    // no payment link yet: say so instead of a button that goes nowhere
+    buy.removeAttribute("href");
+    buy.textContent = "Coming soon";
+    buy.classList.add("disabled");
+  }
+}
+
+function openUpgrade() {
+  document.getElementById("licenseError").classList.add("hidden");
+  document.getElementById("upgradeModal").classList.remove("hidden");
+  loadLicense();
+}
+
+function closeUpgrade() {
+  document.getElementById("upgradeModal").classList.add("hidden");
+}
+
+async function activateLicense() {
+  const input = document.getElementById("licenseKey");
+  const error = document.getElementById("licenseError");
+  const btn = document.getElementById("activateBtn");
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/meta/license`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ key: input.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      // the message comes from the licence check and is written for the buyer
+      error.textContent = data.detail || "could not activate this key";
+      error.classList.remove("hidden");
+      return;
+    }
+    licenseState = data;
+    input.value = "";
+    error.classList.add("hidden");
+    renderLicense();
+    toast("SursumAI Pro is active");
+    onLicenseChanged();
+  } catch {
+    error.textContent = "could not reach SursumAI";
+    error.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deactivateLicense() {
+  if (!confirm("Deactivate Pro on this machine? Your key keeps working elsewhere.")) return;
+  await fetch(`${API}/meta/license`, { method: "DELETE", headers: authHeaders() });
+  licenseState = { pro: false };
+  renderLicense();
+  toast("Back to the free edition on this machine");
+  onLicenseChanged();
+}
+
+/* The Pro build overrides this to show or hide its own tabs. In the free
+   edition there is nothing more to do. */
+function onLicenseChanged() {}

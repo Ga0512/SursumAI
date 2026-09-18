@@ -1042,3 +1042,44 @@ select.input, .select { cursor: pointer; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   Pro licence
+   ========================================================================== */
+.btn-pro {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.btn-pro:hover { background: #e7e5ff; }
+.btn-pro-active {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-soft);
+  cursor: default;
+}
+.upgrade-modal { max-width: 520px; }
+.upgrade-list {
+  list-style: none; padding: 0; margin: 0 0 var(--s4);
+  display: flex; flex-direction: column; gap: var(--s2);
+  color: var(--text-soft); font-size: 0.9rem; line-height: 1.5;
+}
+.upgrade-list b { color: var(--ink); }
+.upgrade-price {
+  display: flex; align-items: baseline; gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+.upgrade-price b { font-size: 2rem; letter-spacing: -0.03em; color: var(--ink); }
+.upgrade-price span { color: var(--text-muted); font-size: 0.85rem; }
+.upgrade-buy { width: 100%; text-align: center; text-decoration: none; }
+.upgrade-buy.disabled { opacity: 0.55; pointer-events: none; }
+.upgrade-note { color: var(--text-muted); font-size: 0.82rem; margin: var(--s4) 0 var(--s2); }
+.upgrade-key-row { display: flex; gap: var(--s2); }
+.upgrade-key-row .input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.upgrade-error { color: var(--red); font-size: 0.82rem; margin-top: var(--s2); }
+.upgrade-active-badge {
+  display: inline-block;
+  color: var(--green); background: var(--green-soft);
+  border: 1px solid #bfe3d4; border-radius: 999px;
+  padding: 4px 12px; font-size: 0.8rem; font-weight: 600;
+}

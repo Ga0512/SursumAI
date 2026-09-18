@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from core import edition
+from core import license
 from core import metrics
 from core import ports
 from core.spec import Spec, SpecError
@@ -421,6 +422,40 @@ async def meta_update_apply():
         raise HTTPException(status_code=502, detail=f"update failed to start: {e}") from e
     return {"status": "started", "version": latest,
             "note": "SursumAI will restart after the update"}
+
+
+# ---- licence ----
+# Free and Pro are the same download; a licence key turns the Pro features on.
+# It is the machine that is licensed, not an account here, so these are
+# read by anyone logged in and written by anyone logged in — there is no
+# "admin" in a dashboard that runs on your own computer.
+
+class LicenseRequest(BaseModel):
+    key: str
+
+
+@app.get("/meta/license")
+async def meta_license(user=Depends(_current_user)):
+    return license.status()
+
+
+@app.post("/meta/license")
+async def meta_license_activate(req: LicenseRequest, user=Depends(_current_user)):
+    try:
+        activated = license.activate(req.key)
+    except license.LicenseError as e:
+        # the buyer reads this exact sentence, so it is theirs, not a stack trace
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    log.info("Pro licence activated for %s", activated.email)
+    return {"pro": True, **activated.to_dict()}
+
+
+@app.delete("/meta/license")
+async def meta_license_deactivate(user=Depends(_current_user)):
+    """Give this machine back to the free edition — how you move a licence to
+    another computer."""
+    license.deactivate()
+    return {"pro": False}
 
 
 # ---- auth ----

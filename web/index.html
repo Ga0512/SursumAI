@@ -35,6 +35,7 @@
       <span class="logo"><svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#111827"/><text x="30" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="42" fill="#ffffff">S</text><rect x="46" y="46" width="12" height="12" rx="3" fill="#635bff"/></svg>SursumAI</span>
       <div class="nav-right">
         <span id="userName" class="nav-user hidden"></span>
+        <button class="btn btn-pro" id="proBtn" onclick="openUpgrade()">Upgrade to Pro</button>
         <button class="btn btn-ghost" onclick="logout()">Sign out</button>
       </div>
     </nav>
@@ -219,6 +220,44 @@
       <div id="progress" class="progress hidden">
         <span class="spinner"></span>
         <span id="progressText">Provisioning…</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======= UPGRADE / LICENCE ======= -->
+  <div id="upgradeModal" class="overlay hidden" onclick="if(event.target===this) closeUpgrade()">
+    <div class="modal glass upgrade-modal">
+      <div class="modal-head">
+        <div>
+          <h3 id="upgradeTitle">SursumAI Pro</h3>
+          <p class="modal-sub" id="upgradeSub">Run models on your other computers and servers.</p>
+        </div>
+        <button class="modal-close" onclick="closeUpgrade()" aria-label="Close">✕</button>
+      </div>
+
+      <div id="upgradeOffer">
+        <ul class="upgrade-list">
+          <li><b>Machines</b> — add a server over SSH and deploy models on it, from here</li>
+          <li><b>Route across machines</b> — a pool can mix your laptop and your GPU server</li>
+          <li>Everything in the free edition, and it stays yours: no subscription</li>
+        </ul>
+        <div class="upgrade-price"><b>$99</b><span>once</span></div>
+        <a class="btn btn-primary upgrade-buy" id="upgradeBuy" target="_blank" rel="noopener">Buy SursumAI Pro</a>
+        <p class="upgrade-note">Already bought it? Paste your licence key:</p>
+        <div class="upgrade-key-row">
+          <input class="input" id="licenseKey" placeholder="SURSUM-…" autocomplete="off" spellcheck="false"
+                 onkeydown="if(event.key==='Enter')activateLicense()">
+          <button class="btn btn-primary" id="activateBtn" onclick="activateLicense()">Activate</button>
+        </div>
+        <p class="upgrade-error hidden" id="licenseError"></p>
+      </div>
+
+      <div id="upgradeActive" class="hidden">
+        <div class="upgrade-active-badge">Pro is active on this machine</div>
+        <p class="upgrade-note" id="licensedTo"></p>
+        <p class="upgrade-note">Moving to another computer? Deactivate here first — the same
+           key then works there.</p>
+        <button class="btn btn-ghost" onclick="deactivateLicense()">Deactivate on this machine</button>
       </div>
     </div>
   </div>
