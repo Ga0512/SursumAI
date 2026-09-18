@@ -22,9 +22,28 @@
 
 set -euo pipefail
 
-SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
+# One installer, two editions. With a GitHub token this installs SursumAI Pro
+# from the private repository; without one, the free edition from the public
+# one. Everything else — the directory, the command, the database — is the
+# same, so upgrading is this command and nothing else.
+SURSUMAI_TOKEN="${SURSUMAI_TOKEN:-${GITHUB_TOKEN:-}}"
+EDITION_FILE="$HOME/.sursumai/edition.json"
+if [ -z "$SURSUMAI_TOKEN" ] && [ -f "$EDITION_FILE" ]; then
+  # an update of an existing Pro install: reuse what was recorded then
+  SURSUMAI_TOKEN="$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$EDITION_FILE" | head -1)"
+  [ -z "${SURSUMAI_REPO:-}" ] && SURSUMAI_REPO="$(sed -n 's/.*"repo"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$EDITION_FILE" | head -1)"
+fi
+if [ -n "$SURSUMAI_TOKEN" ]; then
+  SURSUMAI_REPO="${SURSUMAI_REPO:-sursumai/SursumAI-Pro}"
+else
+  SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
+fi
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_VERSION="${SURSUMAI_VERSION:-v0.8.9}"
+SURSUMAI_PINNED="v0.9.0"
+# Pro releases have their own tags: with a token, the newest one is resolved
+# from the private repository unless a version was asked for explicitly.
+SURSUMAI_VERSION_GIVEN="${SURSUMAI_VERSION:-}"
+SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
 RELEASE_BASE="https://github.com/$SURSUMAI_REPO/releases/download/$SURSUMAI_VERSION"
@@ -116,6 +135,12 @@ verify_checksum() {
     # SHA256SUMS is "<sha>  <filename>" lines; take the one for our asset
     expected="$(curl -fsSL "$SURSUMAI_SHA256_URL" 2>/dev/null       | grep -F " $SURSUMAI_ASSET" | head -1 | cut -d" " -f1 || true)"
   fi
+  if [ -z "$expected" ] && [ -n "$SURSUMAI_TOKEN" ]; then
+    # Pro: no public SHA256SUMS to compare against, and none is needed — the
+    # tarball came from api.github.com over TLS, authenticated as the buyer
+    ok "Downloaded from $SURSUMAI_REPO over an authenticated connection."
+    return 0
+  fi
   if [ -z "$expected" ]; then
     warn "no published checksum for $SURSUMAI_VERSION — cannot verify the download."
     echo "  Continuing, but pass SURSUMAI_SHA256=<sha> to verify it yourself."
@@ -136,6 +161,32 @@ verify_checksum() {
   ok "Checksum verified ($SURSUMAI_VERSION)."
 }
 
+# --- Pro: the same application, from the private repository ---------------------
+# Downloaded through the GitHub API with the buyer's token, because a private
+# release is not readable from a plain URL. The API's source tarball is used
+# rather than an uploaded asset: it needs no per-release bookkeeping, and the
+# download is authenticated end to end over TLS to api.github.com.
+gh_api() {
+  curl -fsSL -H "Authorization: Bearer $SURSUMAI_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+}
+
+if [ -n "$SURSUMAI_TOKEN" ]; then
+  if [ -z "$SURSUMAI_VERSION_GIVEN" ]; then
+    latest="$(gh_api "https://api.github.com/repos/$SURSUMAI_REPO/releases/latest" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    if [ -z "$latest" ]; then
+      fail "could not read the releases of $SURSUMAI_REPO.
+  Your GitHub token may be wrong or expired, or you may not have accepted the
+  invitation to the repository yet. Check your e-mail for it, then try again."
+    fi
+    SURSUMAI_VERSION="$latest"
+  fi
+  SURSUMAI_TARBALL_URL="https://api.github.com/repos/$SURSUMAI_REPO/tarball/$SURSUMAI_VERSION"
+  SURSUMAI_SHA256_URL=""        # a private release publishes no public sums
+fi
+
 # --- code (tarball, no git) ----------------------------------------------------
 mkdir -p "$SURSUMAI_DIR"
 
@@ -143,11 +194,22 @@ if [ -n "$SURSUMAI_SRC_DIR" ]; then
   ok "Using local source: $SURSUMAI_SRC_DIR"
   cp -a "$SURSUMAI_SRC_DIR"/. "$SURSUMAI_DIR"/
 else
-  echo "Downloading SursumAI $SURSUMAI_VERSION …"
+  if [ -n "$SURSUMAI_TOKEN" ]; then
+    echo "Downloading SursumAI Pro $SURSUMAI_VERSION …"
+  else
+    echo "Downloading SursumAI $SURSUMAI_VERSION …"
+  fi
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  curl -fsSL "$SURSUMAI_TARBALL_URL" -o "$TMP/sursumai.tar.gz" \
-    || fail "failed to download $SURSUMAI_TARBALL_URL"
+  if [ -n "$SURSUMAI_TOKEN" ]; then
+    gh_api -H "Accept: application/vnd.github.raw" \
+      "$SURSUMAI_TARBALL_URL" -o "$TMP/sursumai.tar.gz" \
+      || fail "could not download SursumAI Pro $SURSUMAI_VERSION.
+  Check that your GitHub token is valid and that you accepted the invitation."
+  else
+    curl -fsSL "$SURSUMAI_TARBALL_URL" -o "$TMP/sursumai.tar.gz" \
+      || fail "failed to download $SURSUMAI_TARBALL_URL"
+  fi
   # Before a single byte is extracted. This function existed for months without
   # ever being called, while the README and every release note promised it ran.
   verify_checksum "$TMP/sursumai.tar.gz"
@@ -274,6 +336,22 @@ else
 fi
 export PATH="$BIN_DIR:$PATH"
 ok "Command 'sursumai' on PATH ($BIN_DIR)."
+
+# --- remember which edition this is ---------------------------------------------
+# So that the update button, `sursumai update` and the dashboard all look at the
+# repository this was installed from. Without it, a Pro install that updates
+# would quietly come back as the free edition.
+mkdir -p "$HOME/.sursumai"
+if [ -n "$SURSUMAI_TOKEN" ]; then
+  # in a subshell: the umask must not leak into the rest of the install
+  ( umask 077
+    printf '{\n  "repo": "%s",\n  "token": "%s"\n}\n' "$SURSUMAI_REPO" "$SURSUMAI_TOKEN" \
+      > "$EDITION_FILE" )
+  chmod 600 "$EDITION_FILE"
+  ok "SursumAI Pro (updates come from $SURSUMAI_REPO)."
+else
+  printf '{\n  "repo": "%s"\n}\n' "$SURSUMAI_REPO" > "$EDITION_FILE"
+fi
 
 # A machine added from another SursumAI stops here: a server has no desktop to
 # put an icon on, and whoever added it still has to hand it the agent key — an

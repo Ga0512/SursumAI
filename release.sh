@@ -32,7 +32,7 @@ echo "◆ SursumAI release $TAG"
 echo
 
 # --- the release must match what the installer will fetch ---------------------
-grep -q "SURSUMAI_VERSION:-$TAG}" install.sh \
+grep -q "SURSUMAI_PINNED=\"$TAG\"" install.sh \
   || fail "install.sh does not pin $TAG — bump it together with VERSION"
 grep -q "/raw/$TAG/install.sh" README.md \
   || fail "README.md does not install $TAG — bump it together with VERSION"

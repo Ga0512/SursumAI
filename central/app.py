@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import urllib.request
@@ -16,6 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from core import edition
 from core import metrics
 from core import ports
 from core.spec import Spec, SpecError
@@ -338,7 +340,10 @@ async def meta_model_fit(model: str, runtime: str = "llama"):
 
 
 VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
-REPO_BASE = "https://github.com/Ga0512/SursumAI"
+# The free edition updates from the public repository, Pro from the private
+# one it was installed from. Read per call, never captured at import: the file
+# is written by the installer, which may run while this process is alive.
+PUBLIC_REPO_BASE = f"https://github.com/{edition.PUBLIC_REPO}"
 
 
 def _local_version() -> str:
@@ -348,14 +353,13 @@ def _local_version() -> str:
         return "?"
 
 
-LATEST_RELEASE_API = "https://api.github.com/repos/Ga0512/SursumAI/releases/latest"
-
-
 def _latest_version() -> str:
     """The newest published release tag (v1.2.3 -> 1.2.3). Releases, not the
     branch tip: the installer only ever installs a tag."""
+    url = f"https://api.github.com/repos/{edition.repo()}/releases/latest"
+    req = urllib.request.Request(url, headers=edition.api_headers())
     try:
-        with urllib.request.urlopen(LATEST_RELEASE_API, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             tag = (json.load(resp).get("tag_name") or "").strip()
             return tag.lstrip("v") or "?"
     except Exception as e:
@@ -375,6 +379,27 @@ async def meta_update():
     }
 
 
+def _installer_command(tag: str) -> tuple[str, dict]:
+    """How to fetch the installer for a version, for either edition.
+
+    It is the same script both times, and it decides which edition to install
+    by reading ~/.sursumai/edition.json. What differs is where it comes from:
+    a Pro release is tagged in the private repository, and that tag does not
+    exist in the public one — so for Pro it is read through the API, with the
+    buyer's token. Always from the tag being installed, never from a branch.
+
+    The token goes through the environment, never the command line: argv is
+    readable by every process on the machine.
+    """
+    env = {**os.environ, "SURSUMAI_VERSION": tag}
+    if edition.is_pro():
+        url = f"https://api.github.com/repos/{edition.repo()}/contents/install.sh?ref={tag}"
+        env["SURSUMAI_TOKEN"] = edition.token() or ""
+        return (f'curl -fsSL -H "Authorization: Bearer $SURSUMAI_TOKEN" '
+                f'-H "Accept: application/vnd.github.raw" "{url}"'), env
+    return f"curl -fsSL {PUBLIC_REPO_BASE}/raw/{tag}/install.sh", env
+
+
 @app.post("/meta/update")
 async def meta_update_apply():
     """Re-run the installer in the background to update the codebase.
@@ -385,11 +410,10 @@ async def meta_update_apply():
     if latest == "?":
         raise HTTPException(status_code=502, detail="could not find a published release to update to")
     tag = f"v{latest}"
-    # fetch the installer from the tag being installed, never from the branch
-    script = f"{REPO_BASE}/raw/{tag}/install.sh"
+    fetch, env = _installer_command(tag)
     try:
         sp.Popen(
-            ["bash", "-c", f"curl -fsSL {script} | SURSUMAI_VERSION={tag} bash"],
+            ["bash", "-c", f"{fetch} | bash"], env=env,
             stdout=sp.DEVNULL, stderr=sp.DEVNULL,
             start_new_session=True,
         )

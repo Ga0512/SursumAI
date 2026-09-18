@@ -61,7 +61,7 @@ def test_the_pinned_installer_tag_matches_the_version_file():
     that forgets install.sh would ship the previous release forever."""
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     installer = (ROOT / "install.sh").read_text(encoding="utf-8")
-    assert f'SURSUMAI_VERSION="${{SURSUMAI_VERSION:-v{version}}}"' in installer
+    assert f'SURSUMAI_PINNED="v{version}"' in installer
 
 
 def test_the_readme_installs_the_pinned_tag_not_a_branch():

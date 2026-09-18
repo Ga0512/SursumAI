@@ -1,6 +1,6 @@
 // The public site's only script: copy the install command.
 // release.sh keeps the tag here in step with install.sh and the README.
-const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.9/install.sh | bash";
+const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.9.0/install.sh | bash";
 
 function copyInstall() {
   const btn = document.querySelector(".install-copy");

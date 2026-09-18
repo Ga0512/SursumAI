@@ -49,6 +49,10 @@
 - **Instalador em tag fixa + checksum**: `install.sh` instala `v<X.Y.Z>`, nunca
   `main`, e confere o sha256 publicado no release. O update (UI e CLI) busca o
   installer da própria tag.
+- **Free e Pro são o mesmo build**, mesma pasta e mesmo banco; o token decide de
+  onde vem a atualização (`GITHUB_TOKEN` → repo privado). Gravado em
+  `~/.sursumai/edition.json` (0600); `core/edition.py` é a autoridade. Sem isso,
+  o Pro se atualizava de volta para o free. Token nunca em argv.
 
 ## Portas e pools (não regredir)
 

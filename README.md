@@ -17,7 +17,7 @@ Pick a model, click **Deploy**, and any OpenAI-compatible app can talk to it.
 
 ```bash
 # 1. install (WSL on Windows, Terminal on Linux/macOS)
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.9/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.9.0/install.sh | bash
 
 # 2. the browser opens at http://localhost:3000 — create an account,
 #    click "+ New", pick a model, click Deploy
@@ -76,12 +76,22 @@ Real deployments on a 6 GB NVIDIA GPU — Qwen3-0.6B and Qwen3-1.7B, live.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.8.9/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.9.0/install.sh | bash
 ```
 
 The installer downloads a **released tag** — never a moving branch — and
 verifies the tarball against the sha256 published with that release before it
 writes a single file.
+
+If you bought SursumAI Pro, the same command installs it — with your GitHub
+token, which is how it knows:
+
+```bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v0.9.0/install.sh | GITHUB_TOKEN=$(gh auth token) bash
+```
+
+Same directory, same command, same database: your account, models and keys stay
+exactly where they are, and updates keep coming from the edition you have.
 
 Then it does the rest automatically:
 

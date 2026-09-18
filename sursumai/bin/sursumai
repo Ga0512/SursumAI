@@ -481,8 +481,27 @@ def cmd_destroy(args: argparse.Namespace) -> None:
     ok(f"destroyed {deploy_id}")
 
 
-REPO_URL = "https://github.com/Ga0512/SursumAI"
-LATEST_RELEASE_API = "https://api.github.com/repos/Ga0512/SursumAI/releases/latest"
+PUBLIC_REPO = "Ga0512/SursumAI"
+EDITION_FILE = Path.home() / ".sursumai" / "edition.json"
+
+
+def _edition() -> dict:
+    """Where this install updates from: the public repository, or the private
+    Pro one with the buyer's token. Written by the installer; absent means the
+    free edition, which is also what an install older than this file is."""
+    try:
+        data = json.loads(EDITION_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _repo() -> str:
+    return _edition().get("repo") or PUBLIC_REPO
+
+
+def _token() -> str | None:
+    return os.environ.get("SURSUMAI_TOKEN") or _edition().get("token")
 
 
 def _local_version() -> str:
@@ -494,8 +513,14 @@ def _local_version() -> str:
 
 def _latest_tag() -> str:
     """Newest published release tag (vX.Y.Z), or '?' if it cannot be reached."""
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{_repo()}/releases/latest",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "sursumai"})
+    token = _token()
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(LATEST_RELEASE_API, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             return (json.load(resp).get("tag_name") or "").strip() or "?"
     except Exception:
         return "?"
@@ -519,8 +544,18 @@ def cmd_update(args: argparse.Namespace) -> None:
             return
     cmd_stop(args)
     env = {**os.environ, "SURSUMAI_VERSION": tag}
-    # the installer comes from the tag being installed, not from the branch
-    pipe = f"curl -fsSL {REPO_URL}/raw/{tag}/install.sh | bash"
+    # The installer comes from the tag being installed, not from a branch. It
+    # is the same script for both editions; for Pro it lives in the private
+    # repository, read through the API with the token — which travels in the
+    # environment, because argv is readable by every process on the machine.
+    if _repo() != PUBLIC_REPO:
+        env["SURSUMAI_TOKEN"] = _token() or ""
+        url = f"https://api.github.com/repos/{_repo()}/contents/install.sh?ref={tag}"
+        fetch = (f'curl -fsSL -H "Authorization: Bearer $SURSUMAI_TOKEN" '
+                 f'-H "Accept: application/vnd.github.raw" "{url}"')
+    else:
+        fetch = f"curl -fsSL https://github.com/{PUBLIC_REPO}/raw/{tag}/install.sh"
+    pipe = f"{fetch} | bash"
     print("running installer…")
     result = subprocess.run(["bash", "-c", pipe], env=env)
     if result.returncode != 0:
