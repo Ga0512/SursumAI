@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from core import account
+from core import promodule
 from core import metrics
 from core import ports
 from core.spec import Spec, SpecError
@@ -31,12 +32,25 @@ log = logging.getLogger("sursumai.central")
 store = Store()
 
 
+def _load_pro(app: FastAPI) -> bool:
+    """Give the Pro module the running app, if this machine is entitled to it.
+
+    Everything Pro adds registers itself here: the routes, the background work
+    and the reconnection of machines. In the free edition this does nothing at
+    all — there is no module on disk to load.
+    """
+    return promodule.load(app, store=store, current_user=_current_user,
+                          api_user=_api_user, agent_client=agent_client)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store.purge_expired_sessions()
     await asyncio.to_thread(_reconcile_stale)
+    _load_pro(app)
     tasks = [asyncio.create_task(_metrics_loop()),
-             asyncio.create_task(_reconcile_loop())]
+             asyncio.create_task(_reconcile_loop()),
+             asyncio.create_task(_account_loop())]
     try:
         yield
     finally:
@@ -429,7 +443,31 @@ async def meta_account_connect(req: AccountRequest, user=Depends(_current_user))
         # the buyer reads this exact sentence, so it is theirs, not a stack trace
         raise HTTPException(status_code=422, detail=str(e)) from None
     log.info("account connected: %s (%s)", ent.email, ent.plan)
-    return account.status()
+
+    status = account.status()
+    if ent.plan == "pro":
+        # download and turn Pro on now, so nothing has to be restarted
+        try:
+            await asyncio.to_thread(promodule.install)
+            status["loaded"] = await asyncio.to_thread(_load_pro, app)
+        except promodule.ProModuleError as e:
+            # the account is fine; only the download failed, and it retries
+            status["module_error"] = str(e)
+    return status
+
+
+async def _account_loop() -> None:
+    """Ask sursum.ai once a day whether this account is still Pro.
+
+    Quiet by design: a failure changes nothing until the last signed answer
+    actually expires, so our being down is invisible here.
+    """
+    while True:
+        await asyncio.sleep(6 * 3600)
+        try:
+            await asyncio.to_thread(account.refresh)
+        except Exception:
+            log.exception("checking the account failed")
 
 
 @app.delete("/meta/account")
