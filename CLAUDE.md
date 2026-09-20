@@ -4,6 +4,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `AGENTS.md` holds the same guidance for other agents — keep the two in sync when architecture or rules change.
 
+## Estado atual — leia antes de mexer (2026-09-20)
+
+**Há trabalho pela metade.** O produto tem duas edições e, neste momento, **dois mecanismos de liberação do Pro convivem na árvore**. Isso é transitório e precisa terminar em um só.
+
+### Os dois repositórios
+
+| | Caminho local | Remote | O que tem |
+|---|---|---|---|
+| **Público** (Free, MIT) | `HDSeagate/Projects/Model-Serving-Framework` | `origin` = `Ga0512/SursumAI` | o app inteiro, menos as máquinas por SSH |
+| **Pro** (privado) | `HDSeagate/Projects/SursumAI-Pro` | `origin` = `sursumai/SursumAI-Pro`, `upstream` = público | o público + `central/machines.py`, `central/tunnel.py`, aba Machines, `infra/stripe-worker/`, `PRO.md` |
+
+O Pro acompanha o público por `git fetch upstream && git merge upstream/main`. `remote.upstream.tagOpt = --no-tags` está configurado: buscar o público trazia as tags dele e o release do Pro achava que a versão já existia.
+
+Release: público = `bash release.sh` (tag + tarball + `SHA256SUMS`). Pro = `bash release_pro.sh` (tag + release sem assets; todo comando `gh` leva `--repo`, senão ele publica no repositório errado). **Rodar do WSL** com `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME`/e-mail no ambiente — o git do WSL não tem identidade configurada.
+
+### Os dois mecanismos (é aqui que está a confusão)
+
+1. **Token do GitHub — implementado e lançado na v0.9.0.** `core/edition.py`, `~/.sursumai/edition.json`, instalador escolhe o repositório pelo token. Testado instalando como comprador.
+2. **Chave de licença — o que o usuário decidiu adotar, feito pela metade.** `core/ed25519.py` (verificação pura, vetores do RFC 8032) e `core/license.py` (`SURSUM-<payload>.<assinatura>`, offline, `~/.sursumai/license.json` 0600), endpoints `GET/POST/DELETE /meta/license`, e a tela "Upgrade to Pro" em `web/`. 31 testes passando.
+
+**O que falta para fechar o 2 e apagar o 1:**
+
+- **O repositório Pro está com um merge pela metade** (`git status` mostra `UU web/app.js`; o `web/style.css` já foi resolvido mas não foi `git add`). Resolver mantendo os dois lados (o conflito é só "ambos acrescentaram bloco no fim").
+- Travar as máquinas atrás da licença **no backend**, não só escondendo a aba: era um `Depends(_pro)` com HTTP 402 em todas as rotas `/machines` e no `POST /deploys` com `machine_id`. Esconder a aba esconde um botão; a API é quem decide.
+- `web/`: a aba Machines só aparece com licença (`onLicenseChanged()` existe no público como gancho vazio, o Pro sobrescreve).
+- Worker: em vez de convidar no GitHub, conferir a sessão da Stripe e **entregar a chave assinada** na página de sucesso (`?session_id={CHECKOUT_SESSION_ID}`). A chave privada Ed25519 vive só como secret no Cloudflare; a metade pública vai em `core/license.py` (`PUBLIC_KEY_HEX`, hoje vazio) e o `release.sh` deve recusar publicar com ela vazia.
+- Decidir onde o código do Pro mora quando o build for único. O usuário disse: *"o código baixado não é o do GitHub aberto"* — ou seja, fonte no repositório privado, e o tarball distribuído (com o Pro dentro) publicado como asset do release público.
+- Depois disso: apagar `core/edition.py`, o caminho de token no `install.sh` e o `PRO.md` de convite.
+
+### O que está pronto e verificado no Pro
+
+Máquinas por SSH, testado de ponta a ponta **numa GPU de verdade** (pod RunPod, RTX PRO 4500): adicionar máquina (instala sozinho, ~20 s), deploy remoto com GPU, chat pela `/v1` atravessando o túnel (137 tok/s no Qwen3-8B), métricas, reinício do central, "reboot" do servidor, remoção. Dois bugs estruturais achados **só porque foi numa máquina real** e já corrigidos:
+
+- **Nunca guardar no banco a ponta local de um túnel.** As portas locais são redistribuídas a cada start: depois de um restart o endereço salvo apontava para o túnel do agent (todo chat dava 401) e, com duas máquinas, apontaria para o modelo de outra máquina respondendo como se estivesse certo. O banco guarda o endereço que o agent reporta; a ponta local é resolvida a cada leitura (`db.ENDPOINT_RESOLVER` → `machines._resolve_endpoint`), e **ler um deploy nunca abre túnel** (o dashboard lê tudo a cada 5 s).
+- **Um túnel só conta como aberto quando a porta local aceita conexão** (`Tunnel.ready`): o `ssh` existe alguns segundos antes de encaminhar, e nesse intervalo o chat batia em porta fechada.
+
+### O que falta no produto (fora a licença)
+
+Limites por API key e log de auditoria (a landing vende os dois e não existem), pool com modelos em máquinas diferentes (nunca testado), screenshots com a aba Machines, e o Payment Link no botão do site (`PRO_BUY_URL` em `web/app.js`, hoje vazio → o botão diz "Coming soon").
+
+Do lado do usuário: produto e Payment Link na Stripe, Worker no Cloudflare, e uma compra de teste com o cartão 4242. Ele não vai usar domínio no começo (`*.workers.dev` e `*.pages.dev`).
+
 ## Regra crítica
 
 **Nunca executar comandos silenciosamente.** Pergunta do usuário → responder com texto. Só rodar comandos quando pedido explicitamente ("roda", "builda", "instala").
@@ -37,7 +79,7 @@ python -m pytest -k relabel            # um teste (deps: requirements-dev.txt)
 ```
 
 - Logs dos serviços: `/tmp/opencode/{agent,central,web}.log`. Logs de deploy: `sursumai-logs/`.
-- Testes em `tests/` (pytest, 311): `Spec`, portas, auth/hashes, API do central (auth + propriedade dos dados), router (ladder/modos/stage), `executor_llama` (resolução de modelo, GGUF, command lines), contrato agent↔central, streaming, e um e2e do router contra servidores HTTP/SSE de verdade (`test_router_e2e.py`, modelos falsos em sockets reais). CI em `.github/workflows/tests.yml` roda pytest (3.10 e 3.12), `bash -n` + shellcheck e `node --check`. Não há linter nem typecheck de Python.
+- Testes em `tests/` (pytest, 266 funções / ~349 casos com parametrize): `Spec`, portas, auth/hashes, API do central (auth + propriedade dos dados), router (ladder/modos/stage), `executor_llama` (resolução de modelo, GGUF, command lines), contrato agent↔central, streaming, e um e2e do router contra servidores HTTP/SSE de verdade (`test_router_e2e.py`, modelos falsos em sockets reais). CI em `.github/workflows/tests.yml` roda pytest (3.10 e 3.12), `bash -n` + shellcheck e `node --check`. Não há linter nem typecheck de Python.
 - **Porta 8000 pertence a outro projeto** (`omnihunter-process-images`) — nunca usar.
 - Ambiente é Linux/WSL (scripts assumem `bash`, `/tmp`, `setsid`). Rodar do WSL, não do PowerShell.
 
@@ -142,9 +184,22 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
 
 ### Uma edição só
 
-Free e Pro são **o mesmo build**: mesma pasta (`~/sursumai`), mesmo comando, mesmo banco. O que muda é **de onde vem a atualização**, e quem decide isso é o token:
+Free e Pro são **o mesmo build**: mesma pasta (`~/sursumai`), mesmo comando, mesmo banco.
+
+**Em transição** (ver *Estado atual*): o que está lançado decide a edição pelo **token do GitHub**, e o que está sendo construído decide por **chave de licença** (`core/license.py`). O alvo é a chave; o token sai quando ela estiver completa.
+
+#### Pelo token (v0.9.0, no ar)
+
+O que muda é **de onde vem a atualização**, e quem decide isso é o token:
 
 - `curl … | bash` → repo público (free). `curl … | GITHUB_TOKEN=… bash` → repo privado (Pro).
 - O instalador grava `~/.sursumai/edition.json` (0600, guarda o token). `core/edition.py` é a autoridade: `repo()`, `token()`, `is_pro()`, `api_headers()`. Ambiente (`SURSUMAI_TOKEN`) ganha do arquivo.
 - Sem esse arquivo, o Pro clicava em "Update" e **voltava para o free**. O `/meta/update` e o `sursumai update` leem a edição antes de procurar release, e para o Pro buscam o `install.sh` pela **API do repo privado** (a tag do Pro não existe no público).
 - Release privado não tem `SHA256SUMS` público: o tarball vem da API autenticada (`/tarball/<tag>`), TLS + token no lugar do hash. Token **nunca** em argv — vai por env (`SURSUMAI_TOKEN`), como toda chave neste projeto.
+
+#### Pela chave de licença (alvo)
+
+- `core/license.py` verifica `SURSUM-<payload base64url>.<assinatura base64url>` com Ed25519 (`core/ed25519.py`, Python puro — `requirements.txt` tem quatro pacotes de propósito, e checagem de licença não pode ser o motivo de uma instalação falhar).
+- **Offline, sempre.** Licença que telefona para casa transforma queda nossa em "os recursos que você pagou sumiram", num produto cujo ponto é rodar na máquina do cliente. Arquivo corrompido = edição grátis, nunca app que não sobe.
+- Mensagens de erro são escritas **para o comprador** (chave incompleta / danificada / de outra pessoa), e `base64` decodifica com `validate=True`: sem isso o Python descarta caracteres inválidos em silêncio e uma chave digitada errado voltava como "chave inválida", mandando o cliente pedir reembolso em vez de copiar de novo.
+- Isso **não impede** ninguém de editar o código e remover a checagem — nada que roda na máquina do cliente impede. É a linha entre usar o Pro e não pagar por ele, como Sublime Text e GitLab fazem.
