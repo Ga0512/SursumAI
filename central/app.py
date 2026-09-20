@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from core import license
+from core import account
 from core import metrics
 from core import ports
 from core.spec import Spec, SpecError
@@ -405,38 +405,38 @@ async def meta_update_apply():
             "note": "SursumAI will restart after the update"}
 
 
-# ---- licence ----
-# Free and Pro are the same download; a licence key turns the Pro features on.
-# It is the machine that is licensed, not an account here, so these are
-# read by anyone logged in and written by anyone logged in — there is no
-# "admin" in a dashboard that runs on your own computer.
+# ---- the SursumAI account (Pro) ----
+# Free needs no account. Buying Pro creates one on sursum.ai; the token from
+# that account, pasted here, is what turns the Pro features on. The account
+# belongs to the person, this endpoint belongs to the machine — anyone logged
+# into this dashboard can connect or disconnect it, because a dashboard that
+# runs on your own computer has no "admin".
 
-class LicenseRequest(BaseModel):
-    key: str
-
-
-@app.get("/meta/license")
-async def meta_license(user=Depends(_current_user)):
-    return license.status()
+class AccountRequest(BaseModel):
+    token: str
 
 
-@app.post("/meta/license")
-async def meta_license_activate(req: LicenseRequest, user=Depends(_current_user)):
+@app.get("/meta/account")
+async def meta_account(user=Depends(_current_user)):
+    return account.status()
+
+
+@app.post("/meta/account")
+async def meta_account_connect(req: AccountRequest, user=Depends(_current_user)):
     try:
-        activated = license.activate(req.key)
-    except license.LicenseError as e:
+        ent = await asyncio.to_thread(account.connect, req.token)
+    except account.AccountError as e:
         # the buyer reads this exact sentence, so it is theirs, not a stack trace
         raise HTTPException(status_code=422, detail=str(e)) from None
-    log.info("Pro licence activated for %s", activated.email)
-    return {"pro": True, **activated.to_dict()}
+    log.info("account connected: %s (%s)", ent.email, ent.plan)
+    return account.status()
 
 
-@app.delete("/meta/license")
-async def meta_license_deactivate(user=Depends(_current_user)):
-    """Give this machine back to the free edition — how you move a licence to
-    another computer."""
-    license.deactivate()
-    return {"pro": False}
+@app.delete("/meta/account")
+async def meta_account_disconnect(user=Depends(_current_user)):
+    """Sign this machine out — how you move Pro to another computer."""
+    account.disconnect()
+    return account.status()
 
 
 # ---- auth ----

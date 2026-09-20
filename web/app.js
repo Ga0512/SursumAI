@@ -70,7 +70,7 @@ async function submitAuth() {
     showView("dashboard");
     loadDeploys();
     checkUpdate();
-    loadLicense();
+    loadAccount();
     if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
   } catch {
     toast("Could not reach server");
@@ -135,7 +135,7 @@ function restoreSession() {
       showView("dashboard");
       loadDeploys();
       checkUpdate();
-      loadLicense();
+      loadAccount();
       if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
     })
     .catch(() => {});
@@ -1614,45 +1614,45 @@ function stopChat() {
 /* ---- init ---- */
 restoreSession();
 
-/* ---- Pro licence ----
-   Free and Pro are the same download. A signed key, bought once, turns the Pro
-   features on for this machine; the check is offline, so nothing here depends
-   on our servers being up. */
+/* ---- the SursumAI account (Pro) ----
+   Free needs no account. Buying Pro creates one on sursum.ai; the token from
+   that account, pasted here, is what turns the Pro features on. The answer is
+   signed and cached, so this machine keeps working when sursum.ai does not. */
 
-// Where "Buy" goes. Replaced by the real Stripe Payment Link at release.
-const PRO_BUY_URL = "";
+// Where "Go Pro" sends people. Filled in at release.
+const PRO_URL = "";
 
-let licenseState = { pro: false };
+let accountState = { pro: false, connected: false };
 
-async function loadLicense() {
+async function loadAccount() {
   try {
-    const res = await fetch(`${API}/meta/license`, { headers: authHeaders() });
-    if (res.ok) licenseState = await res.json();
+    const res = await fetch(`${API}/meta/account`, { headers: authHeaders() });
+    if (res.ok) accountState = await res.json();
   } catch {}
-  renderLicense();
-  return licenseState;
+  renderAccount();
+  return accountState;
 }
 
-function renderLicense() {
+function renderAccount() {
   const btn = document.getElementById("proBtn");
   if (!btn) return;
-  btn.textContent = licenseState.pro ? "Pro" : "Upgrade to Pro";
-  btn.classList.toggle("btn-pro-active", !!licenseState.pro);
-  document.getElementById("upgradeOffer").classList.toggle("hidden", !!licenseState.pro);
-  document.getElementById("upgradeActive").classList.toggle("hidden", !licenseState.pro);
-  if (licenseState.pro) {
+  btn.textContent = accountState.pro ? "Pro" : "Go Pro";
+  btn.classList.toggle("btn-pro-active", !!accountState.pro);
+  document.getElementById("upgradeOffer").classList.toggle("hidden", !!accountState.pro);
+  document.getElementById("upgradeActive").classList.toggle("hidden", !accountState.pro);
+  if (accountState.pro) {
     document.getElementById("upgradeTitle").textContent = "SursumAI Pro";
     document.getElementById("upgradeSub").textContent =
       "Thank you — Machines is in the tabs above.";
     document.getElementById("licensedTo").textContent =
-      `Licensed to ${licenseState.email || "you"}.`;
+      `Signed in as ${accountState.email || "your account"}.`;
   }
   const buy = document.getElementById("upgradeBuy");
-  if (PRO_BUY_URL) {
-    buy.href = PRO_BUY_URL;
+  if (PRO_URL) {
+    buy.href = PRO_URL;
     buy.classList.remove("disabled");
   } else {
-    // no payment link yet: say so instead of a button that goes nowhere
+    // no store yet: say so instead of a button that goes nowhere
     buy.removeAttribute("href");
     buy.textContent = "Coming soon";
     buy.classList.add("disabled");
@@ -1662,54 +1662,56 @@ function renderLicense() {
 function openUpgrade() {
   document.getElementById("licenseError").classList.add("hidden");
   document.getElementById("upgradeModal").classList.remove("hidden");
-  loadLicense();
+  loadAccount();
 }
 
 function closeUpgrade() {
   document.getElementById("upgradeModal").classList.add("hidden");
 }
 
-async function activateLicense() {
+async function connectAccount() {
   const input = document.getElementById("licenseKey");
   const error = document.getElementById("licenseError");
   const btn = document.getElementById("activateBtn");
   btn.disabled = true;
+  btn.textContent = "Connecting…";
   try {
-    const res = await fetch(`${API}/meta/license`, {
+    const res = await fetch(`${API}/meta/account`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ key: input.value }),
+      body: JSON.stringify({ token: input.value }),
     });
     const data = await res.json();
     if (!res.ok) {
-      // the message comes from the licence check and is written for the buyer
-      error.textContent = data.detail || "could not activate this key";
+      // the message comes from the account check and is written for the buyer
+      error.textContent = data.detail || "could not connect this token";
       error.classList.remove("hidden");
       return;
     }
-    licenseState = data;
+    accountState = data;
     input.value = "";
     error.classList.add("hidden");
-    renderLicense();
-    toast("SursumAI Pro is active");
-    onLicenseChanged();
+    renderAccount();
+    toast(data.pro ? "SursumAI Pro is on" : "Account connected (free plan)");
+    onAccountChanged();
   } catch {
     error.textContent = "could not reach SursumAI";
     error.classList.remove("hidden");
   } finally {
     btn.disabled = false;
+    btn.textContent = "Connect";
   }
 }
 
-async function deactivateLicense() {
-  if (!confirm("Deactivate Pro on this machine? Your key keeps working elsewhere.")) return;
-  await fetch(`${API}/meta/license`, { method: "DELETE", headers: authHeaders() });
-  licenseState = { pro: false };
-  renderLicense();
-  toast("Back to the free edition on this machine");
-  onLicenseChanged();
+async function disconnectAccount() {
+  if (!confirm("Sign this machine out of SursumAI Pro? Your account keeps working elsewhere.")) return;
+  const res = await fetch(`${API}/meta/account`, { method: "DELETE", headers: authHeaders() });
+  accountState = res.ok ? await res.json() : { pro: false, connected: false };
+  renderAccount();
+  toast("This machine is back to the free edition");
+  onAccountChanged();
 }
 
-/* The Pro build overrides this to show or hide its own tabs. In the free
+/* The Pro module overrides this to show or hide its own tabs. In the free
    edition there is nothing more to do. */
-function onLicenseChanged() {}
+function onAccountChanged() {}
