@@ -280,14 +280,13 @@ function pickerProvidersForRuntime() {
   }
 }
 
-/* ---- target segmented control ---- */
-function setTarget(t) {
-  if (t === "aws") { toast("AWS cloud is coming soon"); return; }
-  selectedTarget = t;
-  document.querySelectorAll(".target-card").forEach((b) => {
-    b.classList.toggle("active", b.dataset.target === t);
-  });
+/* The agent to ask about hardware and model fit. This machine's here; the
+   Pro module points them at the machine chosen in its "Where to run". */
+function capsUrl() { return `${API}/meta/capabilities`; }
+function fitUrl(model) {
+  return `${API}/meta/model_fit?model=${encodeURIComponent(model)}&runtime=${selectedRuntime}`;
 }
+function onDeployModalOpen() {}
 
 function setRuntime(r) {
   selectedRuntime = r;
@@ -331,18 +330,18 @@ async function openModal() {
   document.getElementById("f_tokens").value = 2048;
   document.getElementById("f_temp").value = 0;
   document.getElementById("f_port").value = "";
-  setTarget("local");
   document.getElementById("provider_models").classList.add("hidden");
   document.getElementById("f_model").classList.add("hidden");
   document.getElementById("modal").classList.remove("hidden");
   if (!editingId) pickProvider("qwen");
+  onDeployModalOpen();
   await recommendRuntime();
 }
 
 async function recommendRuntime() {
   const note = document.getElementById("runtimeNote");
   try {
-    const res = await fetch(`${API}/meta/capabilities`);
+    const res = await fetch(capsUrl(), { headers: authHeaders() });
     const caps = await res.json();
     const rec = caps.recommended_runtime || "llama";
     setRuntime(rec);
@@ -375,7 +374,7 @@ async function openRedeploy(id) {
   document.getElementById("deployBtn").textContent = "Redeploy";
   const s = d.spec;
   setModelField(s.model);
-  setTarget(s.target || "local");
+  onDeployModalOpen();
   setRuntime(s.runtime || "vllm");
   document.getElementById("f_gpus").value = s.gpus || 1;
   document.getElementById("f_mem").value = s.gpu_memory_utilization || 0.5;
@@ -393,7 +392,7 @@ async function applyFit(prevModel) {
   if (!model || model === prevModel) return;
   const hint = document.getElementById("f_model_hint");
   try {
-    const res = await fetch(`${API}/meta/model_fit?model=${encodeURIComponent(model)}&runtime=${selectedRuntime}`);
+    const res = await fetch(fitUrl(model), { headers: authHeaders() });
     const fit = await res.json();
     if (!fit.ok || fit.fits === false) {
       hint.textContent = fit.message || "Selected model: customize configuration below if you like.";
