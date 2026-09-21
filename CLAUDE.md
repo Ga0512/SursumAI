@@ -57,12 +57,14 @@ Cloudflare. **Nunca** gerar outra: todo install confia nesta.
 - O fluxo de pagamento inteiro: Worker no runtime real (`wrangler dev`), Stripe
   em modo de teste real, app ativando o Pro com token, reinício, cancelamento.
 
-### O que falta para ir ao ar
+### No ar (beta, v1.0.0)
 
-Do usuário: `wrangler login`, criar o D1, os secrets e o GitHub OAuth App, e
-`wrangler deploy` (passo a passo em `SursumAI-Pro/infra/worker/README.md`).
-Com a URL do Worker: `API` em `core/account.py`, `PRO_URL` em `web/app.js`,
-`PUBLIC_KEY_HEX` já está — e lançar a v1.0.0.
+O serviço de conta roda em `https://sursumai.sursumai-beta.workers.dev`
+(Worker `sursumai`, subdomínio `sursumai-beta`, sem domínio próprio). É o
+`API` de `core/account.py`, e o Go Pro do app e do site levam para lá. A Stripe
+ainda está em **modo de teste**: vender de verdade é trocar o
+`STRIPE_SECRET_KEY` para `sk_live_…` e criar produto, preços (mesmos
+lookup_keys) e portal no modo live. A landing (`site/`) vai no Cloudflare Pages.
 
 Fora isso: pool com modelos em máquinas diferentes (nunca testado) e
 screenshots com a aba Machines.

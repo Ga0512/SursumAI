@@ -71,11 +71,11 @@ def _fetch(token: str) -> tuple[bytes, bytes, str]:
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             raise ProModuleError("this account does not have Pro") from None
-        raise ProModuleError(f"sursum.ai answered {e.code} — try again in a moment") from None
+        raise ProModuleError(f"the SursumAI account service answered {e.code} — try again in a moment") from None
     except (urllib.error.URLError, OSError):
-        raise ProModuleError("could not reach sursum.ai — check your connection") from None
+        raise ProModuleError("could not reach the SursumAI account service — check your connection") from None
     except ValueError:
-        raise ProModuleError("sursum.ai sent something unexpected") from None
+        raise ProModuleError("the SursumAI account service sent something unexpected") from None
 
 
 def _safe_members(tar: tarfile.TarFile):

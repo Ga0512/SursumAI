@@ -33,7 +33,7 @@ from pathlib import Path
 
 from core import ed25519
 
-API = os.environ.get("SURSUMAI_API", "https://api.sursum.ai")
+API = os.environ.get("SURSUMAI_API", "https://sursumai.sursumai-beta.workers.dev")
 
 # The public half of the key that signs entitlements and the Pro module. The
 # private half exists only as a Cloudflare secret and in the signing tool.
@@ -92,15 +92,15 @@ def verify(signed: str) -> Entitlement:
         payload_b64, signature_b64 = signed.split(".")
         payload, signature = _b64decode(payload_b64), _b64decode(signature_b64)
     except Exception:
-        raise AccountError("the answer from sursum.ai was damaged") from None
+        raise AccountError("the answer from the SursumAI account service was damaged") from None
     if not ed25519.verify(payload, signature, bytes.fromhex(PUBLIC_KEY_HEX)):
-        raise AccountError("the answer from sursum.ai was not signed by us")
+        raise AccountError("the answer from the SursumAI account service was not signed by us")
     try:
         data = json.loads(payload.decode())
         return Entitlement(account=data["account"], email=data.get("email", ""),
                            plan=data.get("plan", "free"), expires=data["expires"])
     except Exception:
-        raise AccountError("the answer from sursum.ai was damaged") from None
+        raise AccountError("the answer from the SursumAI account service was damaged") from None
 
 
 # ---- what is stored on this machine ----
@@ -157,12 +157,12 @@ def _ask(tok: str) -> str:
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             raise AccountError("this token is not valid — copy it again from "
-                               "your account page on sursum.ai") from None
-        raise AccountError(f"sursum.ai answered {e.code} — try again in a moment") from None
+                               "your SursumAI account page") from None
+        raise AccountError(f"the SursumAI account service answered {e.code} — try again in a moment") from None
     except (urllib.error.URLError, OSError):
-        raise AccountError("could not reach sursum.ai — check your connection") from None
+        raise AccountError("could not reach the SursumAI account service — check your connection") from None
     except (KeyError, ValueError):
-        raise AccountError("sursum.ai sent something unexpected") from None
+        raise AccountError("the SursumAI account service sent something unexpected") from None
 
 
 def connect(tok: str) -> Entitlement:
