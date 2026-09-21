@@ -92,7 +92,9 @@ def test_pasting_the_token_turns_pro_on(api):
 
 def test_without_an_account_this_is_free():
     assert account.is_pro() is False
-    assert account.status() == {"pro": False, "connected": False}
+    status = account.status()
+    assert status["pro"] is False and status["connected"] is False
+    assert status["store"] == account.API          # where Go Pro sends people
 
 
 @pytest.mark.parametrize("typed,message", [
