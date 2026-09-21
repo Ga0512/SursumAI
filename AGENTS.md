@@ -14,27 +14,22 @@
 - Erros em linguagem humana, não stacktrace/`AgentError`.
 - Instalador/scripts entregam tudo embutido e invisível (venv, deps, binário llama, docker).
 
-## Estado atual (2026-09-20) — há trabalho pela metade
+## Estado atual (2026-09-21)
 
-**Dois repositórios:**
+**Um build só** para Free e Pro. Pro = assinatura ($15/mês, $120/ano) que
+destrava máquinas por SSH; esse código **não está neste repositório** — é o
+módulo `sursumai_pro`, baixado pela conta que pagou, verificado (Ed25519) e
+carregado sem reiniciar. Ver *Estado atual* no `CLAUDE.md` para o fluxo e as
+regras.
 
-| | Caminho | Remote | Conteúdo |
-|---|---|---|---|
-| Público (Free, MIT) | `Projects/Model-Serving-Framework` | `origin` = `Ga0512/SursumAI` | o app, menos máquinas por SSH |
-| Pro (privado) | `Projects/SursumAI-Pro` | `origin` = `sursumai/SursumAI-Pro`, `upstream` = público | o público + `central/machines.py`, `central/tunnel.py`, aba Machines, `infra/stripe-worker/`, `PRO.md` |
-
-O Pro acompanha o público por `git fetch upstream && git merge upstream/main` (`remote.upstream.tagOpt --no-tags`, senão as tags do público quebram o release do Pro). Release: público `release.sh`, Pro `release_pro.sh` (todo `gh` com `--repo`, senão publica no repositório errado). Rodar do WSL com identidade git no ambiente.
-
-**Duas formas de liberar o Pro convivem na árvore — é transitório:**
-
-1. **Token do GitHub**: lançado na v0.9.0 (`core/edition.py`, `~/.sursumai/edition.json`, instalador escolhe o repositório pelo token). Funciona, testado como comprador.
-2. **Chave de licença**: o que o usuário decidiu adotar, **pela metade**. `core/ed25519.py` + `core/license.py` + `/meta/license` + tela "Upgrade to Pro" prontos e testados; falta travar as rotas `/machines` com HTTP 402 no backend, esconder a aba sem licença, o Worker entregar a chave após o pagamento, preencher `PUBLIC_KEY_HEX`, e **o repositório Pro está com um merge inacabado** (`UU web/app.js`). Quando fechar, apagar o mecanismo 1.
-
-**Pro verificado numa GPU real** (pod RunPod): adicionar máquina, deploy remoto com GPU, chat pelo túnel, métricas, restart, "reboot", remoção. Duas regras que saíram daí e não podem regredir:
-- **Nunca guardar no banco a ponta local de um túnel** — as portas locais mudam a cada start; o endereço salvo apontava para outro serviço (401) e, com duas máquinas, apontaria para o modelo errado sem erro nenhum. Guardar o endereço que o agent reporta e resolver na leitura; **ler um deploy nunca abre túnel**.
-- **Túnel só vale quando a porta local aceita conexão** (`Tunnel.ready`): o `ssh` existe antes de encaminhar.
-
-**Falta no produto:** limites por API key, log de auditoria (a landing vende os dois), pool entre máquinas diferentes (não testado), screenshots novos, Payment Link no botão (`PRO_BUY_URL`).
+- Repositório Pro (privado) `sursumai/SursumAI-Pro`: módulo + Worker
+  (sursum.ai: GitHub login, Stripe, `/entitlement`, `/module`) + `tools/`.
+- `core/account.py` (token + entitlement assinado, offline), `core/promodule.py`
+  (baixa/verifica/carrega), `pro_hooks` em `central/app.py`, encaixes em
+  `web/app.js`.
+- Regras que não regridem: servidor nosso fora do ar não tira o Pro; cancelamento
+  vale na próxima checagem (402 a cada requisição); nunca guardar ponta local de
+  túnel no banco; outra máquina sem Pro é recusada na API.
 
 - SursumAI rodando como **3 processos separados** (arquitetura do ROADMAP.md): Web (3000), Backend Central (8001), Local Agent (8010).
 - `qwen-vllm/`, `qwen-hf/`, `qwen-ollama/` e os entrypoints `api_server.py`/`handler.py`/Dockerfiles **não fazem mais parte do produto** — foram removidos, existem só no histórico do git.
@@ -69,12 +64,9 @@ O Pro acompanha o público por `git fetch upstream && git merge upstream/main` (
 - **Instalador em tag fixa + checksum**: `install.sh` instala `v<X.Y.Z>`, nunca
   `main`, e confere o sha256 publicado no release. O update (UI e CLI) busca o
   installer da própria tag.
-- **Free e Pro são o mesmo build**, mesma pasta e mesmo banco; hoje o token decide
-  de onde vem a atualização (`GITHUB_TOKEN` → repo privado), gravado em
-  `~/.sursumai/edition.json` (0600), com `core/edition.py` como autoridade. Sem
-  isso, o Pro se atualizava de volta para o free. Token nunca em argv. **Em
-  substituição pela chave de licença** (`core/license.py`, Ed25519 offline,
-  `~/.sursumai/license.json`): ver *Estado atual*.
+- **Free e Pro são o mesmo build**, um repositório de atualização. O Pro vem de
+  uma conta: token em `~/.sursumai/account.json` (0600), entitlement assinado
+  Ed25519 verificado offline, módulo verificado antes de tocar o disco.
 
 ## Portas e pools (não regredir)
 

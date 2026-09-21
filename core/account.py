@@ -35,9 +35,11 @@ from core import ed25519
 
 API = os.environ.get("SURSUMAI_API", "https://api.sursum.ai")
 
-# The public half of the key the Worker signs entitlements with. Empty in a
-# development tree; `release.sh` refuses to publish without it.
-PUBLIC_KEY_HEX = os.environ.get("SURSUMAI_ACCOUNT_KEY", "")
+# The public half of the key that signs entitlements and the Pro module. The
+# private half exists only as a Cloudflare secret and in the signing tool.
+PUBLIC_KEY_HEX = os.environ.get(
+    "SURSUMAI_ACCOUNT_KEY",
+    "a34d25f4fc3ba61969c087706300904c446abf0e6e8e66b281e0685e9559b8e0")
 
 ACCOUNT_FILE = Path(os.path.expanduser("~/.sursumai/account.json"))
 
