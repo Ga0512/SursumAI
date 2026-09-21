@@ -461,9 +461,11 @@ function render(deploys) {
 
 function cardHTML(d) {
   const status = d.status;
-  const meta = `${d.spec.runtime || "vllm"} · ${d.spec.target} · ${d.spec.gpus} GPU${d.spec.gpus > 1 ? "s" : ""} · TP-${d.spec.gpus}`;
-  const url = d.endpoint || "…";
-  const err = d.error ? `<div class="meta" style="color:var(--red)">${d.error}</div>` : "";
+  const where = deployWhere(d);
+  const meta = `${d.spec.runtime || "vllm"}${where ? " · " + escapeHtml(where) : ""} · ${d.spec.gpus} GPU${d.spec.gpus > 1 ? "s" : ""}`;
+  const url = displayUrl(d);
+  // errors can carry text from ssh or an installer on another machine
+  const err = d.error ? `<div class="meta" style="color:var(--red)">${escapeHtml(d.error)}</div>` : "";
   const stageLabel = deployStageLabel(d);
   const stage = stageLabel ? `<div class="meta">${stageLabel}</div>` : "";
   // The preflight checklist explains a deploy that is coming up or that
@@ -806,11 +808,11 @@ async function refreshDetail() {
 function renderDetailMetrics(d) {
   document.getElementById("detailTitle").textContent = d.spec.model;
   document.getElementById("detailSub").textContent =
-    `${d.spec.runtime} · ${d.spec.target} · ${d.spec.gpus} GPU · TP-${d.spec.gpus}`;
+    `${d.spec.runtime}${deployWhere(d) ? " · " + deployWhere(d) : ""} · ${d.spec.gpus} GPU`;
   const st = document.getElementById("detailStatus");
   st.className = `status ${d.status}`;
   st.innerHTML = `<span class="dot"></span>${STATUS_LABEL[d.status] || d.status}`;
-  document.getElementById("detailUrl").textContent = d.endpoint || "…";
+  document.getElementById("detailUrl").textContent = displayUrl(d);
 
   const m = d.metrics;
   if (!m || d.status !== "healthy") {
@@ -1753,3 +1755,9 @@ async function loadProUi() {
     proUiLoaded = true;
   } catch {}
 }
+
+/* Where a deploy runs, for its card (nothing to say when it is here), and the
+   address to show for it. The Pro module overrides both for deploys on other
+   machines. */
+function deployWhere(d) { return ""; }
+function displayUrl(d) { return d.endpoint || "…"; }
