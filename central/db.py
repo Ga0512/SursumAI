@@ -36,6 +36,19 @@ def _default_db_path() -> Path:
 
 DB_PATH = _default_db_path()
 
+ENDPOINT_RESOLVER = None
+"""Where a deploy that lives on another agent can be reached from here.
+
+(store, deploy) -> URL, or None while it cannot be reached. Nothing in this
+build sets it: a deploy always lives on the agent next to the central. The Pro
+module sets it, because a deploy on another machine is reached through an SSH
+tunnel whose local port changes on every start — so that address is resolved
+on every read and never stored. Stored, it survived a restart pointing at
+whatever took that port next: after one restart, every chat went to the
+agent's own tunnel and got 401; with two machines it would have reached another
+machine's model and answered as if nothing were wrong.
+"""
+
 
 class DeployState:
     PENDING = "pending"
@@ -82,14 +95,21 @@ class Deploy:
     def __init__(self, spec: Spec, user_id: str, id: str | None = None,
                  status: str = DeployState.PENDING, endpoint: str | None = None,
                  preflight: list[dict] | None = None,
+                 machine_id: str | None = None,
                  created_at: str | None = None, updated_at: str | None = None,
                  error: str | None = None):
         self.id = id or uuid.uuid4().hex
         self.spec = spec
         self.user_id = user_id
         self.status = status
+        # `endpoint` is the address THIS machine can use; `remote_endpoint` is
+        # what the agent reported on its own machine, and that is what gets
+        # stored. They are the same thing unless the deploy lives elsewhere.
         self.endpoint = endpoint
+        self.remote_endpoint = endpoint
         self.preflight = preflight
+        # None: the agent next to this central. Otherwise, set by Pro.
+        self.machine_id = machine_id
         self.created_at = created_at or _now()
         self.updated_at = updated_at or self.created_at
         self.error = error
@@ -105,6 +125,7 @@ class Deploy:
             "status": self.status,
             "endpoint": self.endpoint,
             "preflight": self.preflight,
+            "machine_id": self.machine_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "error": self.error,
@@ -212,6 +233,7 @@ class Store:
                     endpoint TEXT,
                     preflight TEXT,
                     port INTEGER,
+                    machine_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     error TEXT
@@ -226,6 +248,10 @@ class Store:
             if "port" not in cols:
                 self._conn.execute("ALTER TABLE deploys ADD COLUMN port INTEGER")
                 self._backfill_ports()
+            if "machine_id" not in cols:
+                # NULL means the agent next to this central: every deploy that
+                # exists today keeps running where it runs
+                self._conn.execute("ALTER TABLE deploys ADD COLUMN machine_id TEXT")
         # One deploy per port, enforced by the database rather than by whoever
         # remembers to check. Partial index: legacy rows (port NULL) are exempt.
         self._conn.execute(
@@ -499,13 +525,13 @@ class Store:
         with self._port_lock:
             return ports.first_free(self.taken_ports(exclude_id))
 
-    def create(self, spec: Spec, user_id: str) -> Deploy:
+    def create(self, spec: Spec, user_id: str, machine_id: str | None = None) -> Deploy:
         """Create a deploy, allocating its port if it does not have one."""
         with self._port_lock:
             for _ in range(len(ports.PORT_RANGE)):
                 if not ports.in_range(spec.port):
                     spec.port = ports.first_free(self.taken_ports())
-                deploy = Deploy(spec, user_id)
+                deploy = Deploy(spec, user_id, machine_id=machine_id)
                 try:
                     self._upsert(deploy)
                     return deploy
@@ -586,14 +612,15 @@ class Store:
     def _upsert(self, deploy: Deploy) -> None:
         self._conn.execute(
             """
-            INSERT INTO deploys (id, user_id, spec, status, endpoint, preflight, port, created_at, updated_at, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO deploys (id, user_id, spec, status, endpoint, preflight, port, machine_id, created_at, updated_at, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 spec=excluded.spec,
                 status=excluded.status,
                 endpoint=excluded.endpoint,
                 preflight=excluded.preflight,
                 port=excluded.port,
+                machine_id=excluded.machine_id,
                 updated_at=excluded.updated_at,
                 error=excluded.error
             """,
@@ -602,9 +629,10 @@ class Store:
                 deploy.user_id,
                 json.dumps(deploy.spec.to_dict()),
                 deploy.status,
-                deploy.endpoint,
+                deploy.remote_endpoint if deploy.machine_id else deploy.endpoint,
                 json.dumps(deploy.preflight) if deploy.preflight is not None else None,
                 deploy.spec.port if ports.in_range(deploy.spec.port) else None,
+                deploy.machine_id,
                 deploy.created_at,
                 deploy.updated_at,
                 deploy.error,
@@ -613,6 +641,14 @@ class Store:
         self._conn.commit()
 
     def _from_row(self, row: sqlite3.Row) -> Deploy:
+        deploy = self._deploy_from_row(row)
+        if deploy.machine_id is not None:
+            # resolved on every read, never stored — see ENDPOINT_RESOLVER
+            deploy.remote_endpoint = deploy.endpoint
+            deploy.endpoint = ENDPOINT_RESOLVER(self, deploy) if ENDPOINT_RESOLVER else None
+        return deploy
+
+    def _deploy_from_row(self, row: sqlite3.Row) -> Deploy:
         return Deploy(
             id=row["id"],
             user_id=row["user_id"] or "",
@@ -620,6 +656,7 @@ class Store:
             status=row["status"],
             endpoint=row["endpoint"],
             preflight=json.loads(row["preflight"]) if row["preflight"] else None,
+            machine_id=row["machine_id"] if "machine_id" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             error=row["error"],

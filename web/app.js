@@ -706,6 +706,8 @@ async function deploy() {
     temperature: parseFloat(document.getElementById("f_temp").value) || 0,
     hf_token: document.getElementById("f_hf_token").value.trim() || undefined,
     port: parseInt(document.getElementById("f_port").value, 10) || undefined,
+    // what the Pro module adds to a deploy (the machine it runs on); nothing here
+    ...(editingId ? {} : proDeployFields()),
   };
   if (!payload.model) { toast("Enter a model"); return; }
 
@@ -1151,10 +1153,14 @@ function switchDash(view) {
   document.getElementById("poolsView").classList.toggle("hidden", view !== "pools");
   document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
   document.getElementById("keysView").classList.toggle("hidden", view !== "keys");
+  // views added by the Pro module carry this class and their own data-view
+  document.querySelectorAll(".pro-view").forEach((el) =>
+    el.classList.toggle("hidden", el.dataset.view !== view));
   syncDashActions(view);
   if (view === "chat") loadChat();
   if (view === "pools") loadPoolsView();
   if (view === "keys") loadApiKeys();
+  onProView(view);
 }
 
 /* The header action belongs to the tab you are on: "+ New" deploys a model,
@@ -1630,6 +1636,7 @@ async function loadAccount() {
     if (res.ok) accountState = await res.json();
   } catch {}
   renderAccount();
+  loadProUi();
   return accountState;
 }
 
@@ -1693,6 +1700,7 @@ async function connectAccount() {
     error.classList.add("hidden");
     renderAccount();
     toast(data.pro ? "SursumAI Pro is on" : "Account connected (free plan)");
+    loadProUi();
     onAccountChanged();
   } catch {
     error.textContent = "could not reach SursumAI";
@@ -1715,3 +1723,34 @@ async function disconnectAccount() {
 /* The Pro module overrides this to show or hide its own tabs. In the free
    edition there is nothing more to do. */
 function onAccountChanged() {}
+
+/* ---- the Pro module's interface ----
+   Nothing of the Machines tab is in this file. When the account is Pro and its
+   module is loaded, the module serves its own script and styles, fetched here
+   with the session (they are not public) and run in place. These defaults are
+   what the free edition does: nothing. */
+
+function proDeployFields() { return {}; }
+function onProView(view) {}
+
+let proUiLoaded = false;
+
+async function loadProUi() {
+  if (proUiLoaded || !accountState.pro) return;
+  try {
+    const [js, css] = await Promise.all([
+      fetch(`${API}/pro/ui.js`, { headers: authHeaders() }),
+      fetch(`${API}/pro/ui.css`, { headers: authHeaders() }),
+    ]);
+    if (!js.ok) return;              // Pro, but the module is not loaded yet
+    if (css.ok) {
+      const style = document.createElement("style");
+      style.textContent = await css.text();
+      document.head.appendChild(style);
+    }
+    const script = document.createElement("script");
+    script.src = URL.createObjectURL(new Blob([await js.text()], { type: "text/javascript" }));
+    document.body.appendChild(script);
+    proUiLoaded = true;
+  } catch {}
+}

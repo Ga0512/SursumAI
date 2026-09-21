@@ -32,6 +32,40 @@ log = logging.getLogger("sursumai.central")
 store = Store()
 
 
+class ProHooks:
+    """What the Pro module plugs in. All empty in the free edition.
+
+    The core knows that a deploy may live on an agent that is not the one next
+    to it (`machine_id`), and asks these hooks how to reach it. It knows nothing
+    about SSH, tunnels or machines: that is the Pro module, which is not in
+    this download.
+    """
+    agent_url = None            # (machine_id) -> agent URL; raises AgentError
+    reachable_endpoint = None   # (machine_id, remote endpoint) -> local URL
+    check_target = None         # (machine_id, user) -> None, or HTTPException
+    on_destroy = None           # (deploy) -> None: close what reached it
+    unreachable_reason = None   # (deploy) -> sentence for the user
+    startup: list = []          # blocking callables run in the background at start
+    shutdown: list = []         # callables run when the app stops
+
+
+pro_hooks = ProHooks()
+
+PRO_REQUIRED = ("running on another machine is part of SursumAI Pro. Click Go Pro "
+                "in the dashboard; everything on this machine keeps working as it is.")
+
+
+def _agent(machine_id: str | None) -> str | None:
+    """The agent a deploy lives on, as the URL agent_client takes; None is the
+    one next to this central. An unreachable machine is raised as AgentError,
+    so every place that already handles "the agent did not answer" handles it."""
+    if machine_id is None:
+        return None
+    if pro_hooks.agent_url is None:
+        raise agent_client.AgentError(PRO_REQUIRED)
+    return pro_hooks.agent_url(machine_id)
+
+
 def _load_pro(app: FastAPI) -> bool:
     """Give the Pro module the running app, if this machine is entitled to it.
 
@@ -39,18 +73,22 @@ def _load_pro(app: FastAPI) -> bool:
     and the reconnection of machines. In the free edition this does nothing at
     all — there is no module on disk to load.
     """
-    return promodule.load(app, store=store, current_user=_current_user,
-                          api_user=_api_user, agent_client=agent_client)
+    return promodule.load(app, store=store, hooks=pro_hooks,
+                          current_user=_current_user, agent_client=agent_client)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store.purge_expired_sessions()
-    await asyncio.to_thread(_reconcile_stale)
+    # deploys elsewhere are left alone here: their connections are not open
+    # yet, and a server that is down must not hold the start of the dashboard
+    # hostage
+    await asyncio.to_thread(_reconcile_stale, None, False)
     _load_pro(app)
     tasks = [asyncio.create_task(_metrics_loop()),
              asyncio.create_task(_reconcile_loop()),
              asyncio.create_task(_account_loop())]
+    tasks += [asyncio.create_task(asyncio.to_thread(fn)) for fn in pro_hooks.startup]
     try:
         yield
     finally:
@@ -58,6 +96,11 @@ async def lifespan(app: FastAPI):
         # two of each running against the same database
         for task in tasks:
             task.cancel()
+        for fn in pro_hooks.shutdown:
+            try:
+                fn()
+            except Exception:
+                log.exception("a Pro shutdown hook failed")
 
 
 app = FastAPI(title="SursumAI Central", lifespan=lifespan)
@@ -94,6 +137,8 @@ class DeployRequest(BaseModel):
     max_tokens: int = 2048
     temperature: float = 0.0
     hf_token: str = ""
+    # None runs on this machine; anything else needs SursumAI Pro
+    machine_id: str | None = None
 
 
 class RedeployRequest(BaseModel):
@@ -183,6 +228,16 @@ def _spec_from_request(req: DeployRequest | RedeployRequest, base: Spec | None =
     return spec
 
 
+def _no_endpoint(deploy) -> str:
+    """A healthy deploy with no address: here, it is still coming up; on
+    another machine, its connection is not open yet."""
+    if deploy.machine_id is None:
+        return "deploy has no endpoint yet"
+    if pro_hooks.unreachable_reason is not None:
+        return pro_hooks.unreachable_reason(deploy)
+    return PRO_REQUIRED
+
+
 def _get_owned_deploy(deploy_id: str, user_id: str):
     deploy = store.get(deploy_id)
     if deploy is None or deploy.user_id != user_id:
@@ -190,11 +245,13 @@ def _get_owned_deploy(deploy_id: str, user_id: str):
     return deploy
 
 
-async def _wait_healthy(deploy_id: str, timeout: int = 1800) -> bool:
+async def _wait_healthy(deploy_id: str, machine_id: str | None = None,
+                        timeout: int = 1800) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            st = await asyncio.to_thread(agent_client.status, deploy_id)
+            agent = await asyncio.to_thread(_agent, machine_id)
+            st = await asyncio.to_thread(agent_client.status, deploy_id, agent)
             if st.get("healthy"):
                 return True
         except agent_client.AgentError:
@@ -203,11 +260,16 @@ async def _wait_healthy(deploy_id: str, timeout: int = 1800) -> bool:
     return False
 
 
-async def _run_preflight(spec: Spec) -> list[dict] | None:
+async def _run_preflight(spec: Spec, machine_id: str | None = None) -> list[dict] | None:
     try:
-        result = await asyncio.to_thread(agent_client.preflight, spec.to_dict())
+        agent = await asyncio.to_thread(_agent, machine_id)
+        result = await asyncio.to_thread(agent_client.preflight, spec.to_dict(), agent)
         return result.get("checks")
     except agent_client.AgentError as e:
+        if machine_id is not None:
+            # here a missing agent is not fatal (it may be starting); another
+            # machine that cannot be reached is simply not usable
+            return [{"name": "machine", "ok": False, "detail": str(e)}]
         log.warning("preflight could not reach the agent: %s", e)
         return None
 
@@ -219,7 +281,7 @@ async def _deploy_job(deploy_id: str) -> None:
 
     deploy.status = DeployState.CHECKING
     store.update(deploy)
-    checks = await _run_preflight(deploy.spec)
+    checks = await _run_preflight(deploy.spec, deploy.machine_id)
     deploy = store.get(deploy_id)
     if deploy is None:
         return
@@ -234,16 +296,23 @@ async def _deploy_job(deploy_id: str) -> None:
     deploy.status = DeployState.PROVISIONING
     store.update(deploy)
     try:
-        await asyncio.to_thread(agent_client.start, deploy.id, deploy.spec.to_dict())
+        agent = await asyncio.to_thread(_agent, deploy.machine_id)
+        await asyncio.to_thread(agent_client.start, deploy.id, deploy.spec.to_dict(), agent)
         deploy = store.get(deploy_id)
         if deploy is None:
             return
-        ok = await _wait_healthy(deploy_id)
+        ok = await _wait_healthy(deploy_id, deploy.machine_id)
         deploy.status = DeployState.HEALTHY if ok else DeployState.FAILED
         if ok:
             try:
-                st = await asyncio.to_thread(agent_client.status, deploy_id)
-                deploy.endpoint = st.get("endpoint")
+                st = await asyncio.to_thread(agent_client.status, deploy_id, agent)
+                # the address as the agent sees it is what gets stored; for a
+                # deploy elsewhere, Pro opens what makes it reachable from here
+                deploy.remote_endpoint = st.get("endpoint")
+                deploy.endpoint = deploy.remote_endpoint
+                if deploy.machine_id is not None and pro_hooks.reachable_endpoint:
+                    deploy.endpoint = await asyncio.to_thread(
+                        pro_hooks.reachable_endpoint, deploy.machine_id, deploy.remote_endpoint)
                 if st.get("auth_enforced") is False:
                     # the runtime came up ignoring its key file: the endpoint is
                     # reachable by anyone who finds the port
@@ -252,8 +321,11 @@ async def _deploy_job(deploy_id: str) -> None:
                         "did not apply its API key. Endpoint %s is open to anything "
                         "that can reach the port.", deploy_id, deploy.endpoint,
                     )
-            except agent_client.AgentError:
+            except agent_client.AgentError as e:
                 deploy.endpoint = None
+                if deploy.machine_id is not None:
+                    deploy.status = DeployState.FAILED
+                    deploy.error = f"the model started but cannot be reached: {e}"
         else:
             deploy.error = "Model did not become healthy in time"
     except agent_client.AgentError as e:
@@ -295,7 +367,8 @@ async def _metrics_loop() -> None:
             if not d.endpoint:
                 continue
             try:
-                snap = await asyncio.to_thread(agent_client.metrics, d.id)
+                agent = await asyncio.to_thread(_agent, d.machine_id)
+                snap = await asyncio.to_thread(agent_client.metrics, d.id, agent)
                 store.save_metrics(d.id, snap)
             except agent_client.AgentError as e:
                 # expected while a model is still warming up or already gone
@@ -304,16 +377,24 @@ async def _metrics_loop() -> None:
                 log.exception("unexpected error scraping metrics for %s", d.id)
 
 
-def _reconcile_stale(statuses: set[str] | None = None) -> None:
-    """Mark deploys as failed when the underlying process/container is gone."""
+def _reconcile_stale(statuses: set[str] | None = None, remote: bool = True) -> None:
+    """Mark deploys as failed when the underlying process/container is gone.
+
+    `remote=False` skips deploys on other machines: at startup their
+    connections are not open yet, and opening one per deploy here would hold
+    the dashboard hostage to every server that happens to be down."""
     if statuses is None:
         statuses = {DeployState.HEALTHY, DeployState.REDEPLOYING, DeployState.PROVISIONING}
     for d in store.list():
         if d.status not in statuses:
             continue
+        if not remote and d.machine_id is not None:
+            continue
         try:
-            st = agent_client.status(d.id)
+            st = agent_client.status(d.id, _agent(d.machine_id))
         except agent_client.AgentError:
+            # an unanswered agent, or a machine whose network dropped, says
+            # nothing about the model; only "not running" does
             continue
         if not st.get("running"):
             d.status = DeployState.FAILED
@@ -555,10 +636,15 @@ async def create_deploy(req: DeployRequest, user=Depends(_current_user)):
     # every deploy gets its own bearer key; the runtime is started with
     # --api-key so the model endpoint is not open to whoever finds the port
     spec.api_key = authmod.new_deploy_key()
+    if req.machine_id is not None:
+        # checked by the API, not only hidden in the interface
+        if pro_hooks.check_target is None:
+            raise HTTPException(status_code=402, detail=PRO_REQUIRED)
+        pro_hooks.check_target(req.machine_id, user)
     try:
         # store.create allocates the port under a lock; the UNIQUE index is
         # the last word, so two simultaneous creates cannot share one
-        deploy = store.create(spec, user.id)
+        deploy = store.create(spec, user.id, machine_id=req.machine_id)
     except ports.NoPortAvailable as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
     asyncio.create_task(_deploy_job(deploy.id))
@@ -579,7 +665,8 @@ async def get_deploy(deploy_id: str, user=Depends(_current_user)):
     out = {**deploy.to_dict(), "metrics": _latest_metrics(deploy_id), "spark": _spark(deploy_id)}
     if deploy.status in (DeployState.CHECKING, DeployState.PROVISIONING, DeployState.REDEPLOYING):
         try:
-            st = await asyncio.to_thread(agent_client.status, deploy_id)
+            agent = await asyncio.to_thread(_agent, deploy.machine_id)
+            st = await asyncio.to_thread(agent_client.status, deploy_id, agent)
             out["stage"] = st.get("stage")
         except agent_client.AgentError:
             pass
@@ -624,9 +711,11 @@ async def redeploy(deploy_id: str, req: RedeployRequest, user=Depends(_current_u
 
 @app.get("/deploys/{deploy_id}/logs")
 async def get_logs(deploy_id: str, tail: int = 300, user=Depends(_current_user)):
-    _get_owned_deploy(deploy_id, user.id)
+    deploy = _get_owned_deploy(deploy_id, user.id)
     try:
-        content = await asyncio.to_thread(agent_client.logs, deploy_id, min(max(tail, 10), 5000))
+        agent = await asyncio.to_thread(_agent, deploy.machine_id)
+        content = await asyncio.to_thread(
+            agent_client.logs, deploy_id, min(max(tail, 10), 5000), agent)
     except agent_client.AgentError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return {"logs": content}
@@ -638,7 +727,7 @@ async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_curre
     Supports streaming (SSE) when req.stream is true."""
     deploy = _get_owned_deploy(deploy_id, user.id)
     if not deploy.endpoint:
-        raise HTTPException(status_code=409, detail="deploy has no endpoint yet")
+        raise HTTPException(status_code=409, detail=_no_endpoint(deploy))
     payload: dict = {
         "model": deploy.spec.model,
         "messages": req.messages,
@@ -669,9 +758,12 @@ async def destroy_deploy(deploy_id: str, user=Depends(_current_user)):
     deploy.status = DeployState.DESTROYING
     store.update(deploy)
     try:
-        await asyncio.to_thread(agent_client.stop, deploy.id)
-    except agent_client.AgentError:
-        pass
+        agent = await asyncio.to_thread(_agent, deploy.machine_id)
+        await asyncio.to_thread(agent_client.stop, deploy.id, agent)
+    except agent_client.AgentError as e:
+        log.warning("could not stop %s on its agent: %s", deploy.id, e)
+    if deploy.machine_id is not None and pro_hooks.on_destroy is not None:
+        pro_hooks.on_destroy(deploy)
     store.delete(deploy_id)
     return {"status": "deleted"}
 
@@ -942,9 +1034,14 @@ def _resolve_target(user: object, model: str):
     if healthy:
         return "deploy", healthy[0]
     if matches:
+        # a healthy deploy with no address is not "not ready": it runs on
+        # another machine whose connection is not open at this moment, and
+        # "not ready (healthy)" sends the user to debug the model
+        waiting = next((d for d in matches if d.status == DeployState.HEALTHY), None)
         raise HTTPException(
             status_code=422,
-            detail=f"'{model}' is deployed but not ready ({matches[0].status})",
+            detail=_no_endpoint(waiting) if waiting is not None
+            else f"'{model}' is deployed but not ready ({matches[0].status})",
         )
 
     known = sorted({d.spec.model for d in store.list(user.id)
@@ -987,7 +1084,8 @@ async def _chat_with_deploy(deploy, req: RouterChatRequest):
     if deploy.status != DeployState.HEALTHY or not deploy.endpoint:
         raise HTTPException(
             status_code=422,
-            detail=f"{deploy.spec.model} is not ready ({deploy.status})")
+            detail=_no_endpoint(deploy) if deploy.status == DeployState.HEALTHY
+            else f"{deploy.spec.model} is not ready ({deploy.status})")
     payload: dict = {
         "model": deploy.spec.model,
         "messages": req.messages,
