@@ -207,6 +207,8 @@ def disconnect() -> None:
 def status() -> dict:
     """What the dashboard shows."""
     ent = entitlement()
+    # where "Go Pro" sends people: the same service this machine asks, so a
+    # single setting (API) points both at it
     if ent is None:
-        return {"pro": False, "connected": token() is not None}
-    return {"pro": ent.plan == "pro", "connected": True, **ent.to_dict()}
+        return {"pro": False, "connected": token() is not None, "store": API}
+    return {"pro": ent.plan == "pro", "connected": True, "store": API, **ent.to_dict()}

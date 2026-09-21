@@ -1626,8 +1626,6 @@ restoreSession();
    that account, pasted here, is what turns the Pro features on. The answer is
    signed and cached, so this machine keeps working when sursum.ai does not. */
 
-// Where "Go Pro" sends people. Filled in at release.
-const PRO_URL = "";
 
 let accountState = { pro: false, connected: false };
 
@@ -1656,8 +1654,11 @@ function renderAccount() {
       `Signed in as ${accountState.email || "your account"}.`;
   }
   const buy = document.getElementById("upgradeBuy");
-  if (PRO_URL) {
-    buy.href = PRO_URL;
+  // the account service the app talks to is also where people subscribe
+  const store = accountState.store;
+  if (store && !store.includes("api.sursum.ai")) {
+    buy.href = store;
+    buy.textContent = "Go Pro";
     buy.classList.remove("disabled");
   } else {
     // no store yet: say so instead of a button that goes nowhere
