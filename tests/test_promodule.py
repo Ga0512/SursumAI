@@ -85,7 +85,7 @@ def served(monkeypatch):
     """What sursum.ai serves at /module."""
     state = {"archive": _archive(MODULE), "secret": SECRET, "version": "1.0.0"}
 
-    def _fetch(token):
+    def _fetch(token, timeout=60):
         state["token"] = token
         return state["archive"], _sign(state["archive"], state["secret"]), state["version"]
 
@@ -126,7 +126,7 @@ def test_a_tampered_archive_is_refused(served, monkeypatch):
     served["archive"] = _archive({"sursumai_pro/__init__.py": "import os  # surprise\n"})
     # the signature of the original, with the new bytes
     import core.promodule as pm
-    monkeypatch.setattr(pm, "_fetch", lambda token: (served["archive"], signature, "1.0.0"))
+    monkeypatch.setattr(pm, "_fetch", lambda token, timeout=60: (served["archive"], signature, "1.0.0"))
 
     with pytest.raises(promodule.ProModuleError, match="not signed"):
         promodule.install()
@@ -157,6 +157,31 @@ def test_a_failed_install_leaves_the_previous_module_alone(served, monkeypatch):
 
     assert promodule.is_installed() is True      # still the good one
     assert promodule.installed_version() == "1.0.0"
+
+
+def test_a_pro_account_gets_the_new_module_on_its_own(served, monkeypatch):
+    """A fix to the module must reach people who already pasted their token."""
+    _pro_account(monkeypatch)
+    promodule.install()
+    served["version"] = "1.0.1"
+
+    assert promodule.update() == "1.0.1"
+    assert promodule.installed_version() == "1.0.1"
+
+
+def test_updating_fails_quietly_and_keeps_what_is_there(served, monkeypatch):
+    _pro_account(monkeypatch)
+    promodule.install()
+    served["secret"] = OTHER
+
+    assert promodule.update() is None
+    assert promodule.installed_version() == "1.0.0"
+
+
+def test_a_free_account_downloads_nothing_on_update(served, monkeypatch):
+    _pro_account(monkeypatch, pro=False)
+    assert promodule.update() is None
+    assert "token" not in served
 
 
 def test_without_an_account_there_is_nothing_to_download(monkeypatch):

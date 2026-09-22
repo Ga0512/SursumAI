@@ -84,6 +84,9 @@ async def lifespan(app: FastAPI):
     # yet, and a server that is down must not hold the start of the dashboard
     # hostage
     await asyncio.to_thread(_reconcile_stale, None, False)
+    # before loading, so a fixed module is the one that runs; short, because
+    # our server being slow must not hold the dashboard's start hostage
+    await asyncio.to_thread(promodule.update, 8)
     _load_pro(app)
     tasks = [asyncio.create_task(_metrics_loop()),
              asyncio.create_task(_reconcile_loop()),
@@ -547,6 +550,8 @@ async def _account_loop() -> None:
         await asyncio.sleep(6 * 3600)
         try:
             await asyncio.to_thread(account.refresh)
+            # used from the next start: the running one is already imported
+            await asyncio.to_thread(promodule.update)
         except Exception:
             log.exception("checking the account failed")
 

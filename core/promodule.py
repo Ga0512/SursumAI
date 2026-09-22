@@ -58,13 +58,13 @@ def is_installed() -> bool:
 
 # ---- getting it ----
 
-def _fetch(token: str) -> tuple[bytes, bytes, str]:
+def _fetch(token: str, timeout: float = 60) -> tuple[bytes, bytes, str]:
     """Download the module. Returns (archive, signature, version)."""
     req = urllib.request.Request(
         f"{account.API}/module",
         headers={"Authorization": f"Bearer {token}", "User-Agent": "sursumai"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             signature = bytes.fromhex(resp.headers.get("X-Signature", ""))
             version = resp.headers.get("X-Version", "")
             return resp.read(), signature, version
@@ -91,7 +91,7 @@ def _safe_members(tar: tarfile.TarFile):
         yield member
 
 
-def install(token: str | None = None) -> str:
+def install(token: str | None = None, timeout: float = 60) -> str:
     """Download and unpack the Pro module. Returns the version."""
     token = token or account.token()
     if not token:
@@ -99,7 +99,7 @@ def install(token: str | None = None) -> str:
     if not account.PUBLIC_KEY_HEX:
         raise ProModuleError("this build cannot check signatures — please report this")
 
-    archive, signature, version = _fetch(token)
+    archive, signature, version = _fetch(token, timeout)
     if not ed25519.verify(archive, signature, bytes.fromhex(account.PUBLIC_KEY_HEX)):
         # not "corrupted": a wrong signature means it is not ours
         raise ProModuleError("the Pro module was not signed by SursumAI — "
@@ -124,6 +124,21 @@ def install(token: str | None = None) -> str:
 
 
 RESTART_NEEDED = False
+
+
+def update(timeout: float = 60) -> str | None:
+    """Fetch the Pro module again, for an account that has Pro.
+
+    Without this a fix to the module only reached someone who pasted the token
+    again. Quiet on failure: the module already on disk keeps working, and our
+    server being down must not show up here. Returns the version installed."""
+    if not account.is_pro():
+        return None
+    try:
+        return install(timeout=timeout)
+    except ProModuleError as e:
+        log.debug("the Pro module was not updated: %s", e)
+        return None
 
 
 def _forget_import() -> None:
