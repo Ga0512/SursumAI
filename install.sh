@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_PINNED="v1.0.0"
+SURSUMAI_PINNED="v1.0.1"
 SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
@@ -323,11 +323,24 @@ elif [ "$IS_WSL" -eq 1 ]; then
   if [ -n "$WIN_PROFILE" ]; then
     DESKTOP="$(wslpath -u "$WIN_PROFILE\\Desktop")" 2>/dev/null || DESKTOP=""
     if [ -n "$DESKTOP" ] && [ -d "$DESKTOP" ]; then
-      cat > "$DESKTOP/sursumai.bat" <<EOF
+      # the .bat does the work; a .lnk pointing at it carries the icon (a .bat
+      # cannot have one). No PowerShell, no .lnk: the .bat alone still works.
+      WIN_DIR="$(wslpath -u "$WIN_PROFILE")/.sursumai"
+      mkdir -p "$WIN_DIR"
+      cp -f "$SURSUMAI_DIR/assets/sursumai.ico" "$WIN_DIR/sursumai.ico" 2>/dev/null || true
+      cat > "$WIN_DIR/sursumai.bat" <<EOF
 @echo off
 wsl -e bash -lc "$BIN_DIR/sursumai --ui"
 EOF
-      ok "Shortcut on the Windows Desktop: sursumai.bat"
+      rm -f "$DESKTOP/sursumai.bat"
+      if command -v powershell.exe >/dev/null 2>&1 && powershell.exe -NoProfile -Command \
+          "\$s=(New-Object -ComObject WScript.Shell).CreateShortcut('$WIN_PROFILE\\Desktop\\SursumAI.lnk');\$s.TargetPath='$WIN_PROFILE\\.sursumai\\sursumai.bat';\$s.IconLocation='$WIN_PROFILE\\.sursumai\\sursumai.ico';\$s.WindowStyle=7;\$s.Save()" \
+          >/dev/null 2>&1; then
+        ok "Shortcut on the Windows Desktop: SursumAI"
+      else
+        cp -f "$WIN_DIR/sursumai.bat" "$DESKTOP/sursumai.bat"
+        ok "Shortcut on the Windows Desktop: sursumai.bat"
+      fi
     fi
   fi
 fi

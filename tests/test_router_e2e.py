@@ -133,8 +133,8 @@ def client(tmp_path, monkeypatch, model_server):
 def _deploy(client, name):
     """A deploy wired to a live fake model on its allocated port."""
     body = client.post("/deploys", json={"model": name, "runtime": "llama"}).json()
-    port = client.model_server(name, body["spec"]["api_key"])
     deploy = client.store.get(body["id"])
+    port = client.model_server(name, deploy.spec.api_key)
     deploy.status = DeployState.HEALTHY
     deploy.endpoint = f"http://127.0.0.1:{port}/v1"
     client.store.update(deploy)

@@ -78,6 +78,7 @@ echo "Web:     http://localhost:3000"
 echo "Central: http://localhost:8001"
 echo "Agent:   http://localhost:8010"
 echo "Logs:    $LOGDIR/{agent,central,web}.log"
+tr -d "[:space:]" < "$(dirname "$0")/VERSION" > "$LOGDIR/running-version" 2>/dev/null || true
 
 # Open the browser for the user (WSL on Windows, xdg-open elsewhere).
 URL="http://localhost:3000"

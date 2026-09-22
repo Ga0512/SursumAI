@@ -118,6 +118,9 @@ class Deploy:
         spec = self.spec.to_dict()
         if spec.get("hf_token"):
             spec["hf_token"] = "***"
+        # the key that locks the model's port is internal: every caller that
+        # needs it reads the Spec, and the API never hands it out
+        spec.pop("api_key", None)
         return {
             "id": self.id,
             "user_id": self.user_id,

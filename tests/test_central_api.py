@@ -170,7 +170,16 @@ def test_a_new_deploy_gets_a_port_and_an_internal_key(client):
                        headers=_auth(token)).json()
     assert 9000 <= body["spec"]["port"] <= 9099
     # internal: it locks the model port, the user holds an account key instead
-    assert body["spec"]["api_key"].startswith("sk-internal-")
+    assert client.store.get(body["id"]).spec.api_key.startswith("sk-internal-")
+
+
+def test_the_internal_key_is_never_handed_out(client):
+    token = _register(client)
+    deploy_id = _make_deploy(client, token)
+    for body in (client.get(f"/deploys/{deploy_id}", headers=_auth(token)).json(),
+                 client.get("/deploys", headers=_auth(token)).json()[0]):
+        assert "api_key" not in body["spec"]
+        assert "sk-internal-" not in str(body)
 
 
 def test_deploys_never_share_a_port(client):
@@ -198,11 +207,11 @@ def test_the_hf_token_is_never_echoed_back(client):
 def test_a_redeploy_keeps_the_port_and_the_key(client):
     token = _register(client)
     deploy_id = _make_deploy(client, token)
-    before = client.get(f"/deploys/{deploy_id}", headers=_auth(token)).json()["spec"]
+    before = client.store.get(deploy_id).spec
     after = client.post(f"/deploys/{deploy_id}/redeploy", json={"max_tokens": 99},
                         headers=_auth(token)).json()["spec"]
-    assert after["port"] == before["port"]
-    assert after["api_key"] == before["api_key"]
+    assert after["port"] == before.port
+    assert client.store.get(deploy_id).spec.api_key == before.api_key
     assert after["max_tokens"] == 99
 
 
