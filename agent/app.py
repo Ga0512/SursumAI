@@ -211,7 +211,8 @@ async def model_fit(model: str, runtime: str = "llama"):
 
     Pure suggestion: the user may override the values in the UI."""
     vram = _gpu_vram_mb()
-    sizes = _hf_sizes(model)
+    repo, quant = executor_llama.split_quant(model)
+    sizes = _hf_sizes(repo)
     if vram is None or sizes is None:
         return {"ok": False, "reason": "unavailable"}
     total_mb, free_mb = vram
@@ -219,8 +220,9 @@ async def model_fit(model: str, runtime: str = "llama"):
     if runtime == "vllm":
         weights_bytes = sum(v for name, v in sizes.items() if name.endswith(".safetensors"))
     else:
-        gguf = [v for name, v in sizes.items() if name.endswith(".gguf") and not name.startswith("mmproj")]
-        weights_bytes = max(gguf) if gguf else 0
+        # the file that will actually be downloaded, not the biggest in the repo
+        chosen = executor_llama._pick_gguf(list(sizes), quant)
+        weights_bytes = sizes.get(chosen, 0) if chosen else 0
     weights_mb = weights_bytes / (1024 * 1024)
 
     # heuristic: weights + ~15% headroom should fit in the utilization budget

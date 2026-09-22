@@ -493,3 +493,43 @@ def test_the_vllm_container_publishes_on_loopback_too(monkeypatch):
     monkeypatch.delenv("SURSUMAI_BIND", raising=False)
     cmd = executor.build_cmd(_spec(), "id")
     assert cmd[cmd.index("-p") + 1].startswith("127.0.0.1:")
+
+
+# ---- choosing the quantization: org/name:QUANT ----
+
+QWEN36 = ["Qwen3.6-27B-Q4_K_S.gguf", "Qwen3.6-27B-Q4_K_M.gguf", "Qwen3.6-27B-UD-Q4_K_XL.gguf",
+          "Qwen3.6-27B-IQ4_XS.gguf", "BF16/Qwen3.6-27B-BF16-00001-of-00002.gguf",
+          "BF16/Qwen3.6-27B-BF16-00002-of-00002.gguf", "mmproj-F16.gguf"]
+
+
+def test_the_quantization_after_a_colon_picks_that_file():
+    assert ex.split_quant("unsloth/Qwen3.6-27B-GGUF:Q4_K_S") == \
+        ("unsloth/Qwen3.6-27B-GGUF", "Q4_K_S")
+    assert ex._pick_gguf(QWEN36, "Q4_K_S") == "Qwen3.6-27B-Q4_K_S.gguf"
+    assert ex._pick_gguf(QWEN36, "ud-q4_k_xl") == "Qwen3.6-27B-UD-Q4_K_XL.gguf"
+
+
+def test_without_a_colon_the_default_is_still_picked():
+    assert ex.split_quant("unsloth/Qwen3.6-27B-GGUF") == ("unsloth/Qwen3.6-27B-GGUF", None)
+    assert ex._pick_gguf(QWEN36) == "Qwen3.6-27B-Q4_K_M.gguf"
+
+
+def test_a_prefix_of_a_quantization_does_not_match_another():
+    """Q4_K must not quietly become Q4_K_S or Q4_K_M."""
+    assert ex._pick_gguf(QWEN36, "Q4_K") is None
+
+
+def test_split_files_are_never_picked():
+    """Only the first part would be downloaded, and it does not load alone."""
+    assert ex._pick_gguf(QWEN36, "BF16") is None
+
+
+@pytest.mark.parametrize("model", ["org/m:Q4_K_S", "org/m:UD-Q4_K_XL", "org/m"])
+def test_model_ids_with_a_quantization_are_valid(model):
+    assert ex._validate_model_id(model) == model
+
+
+@pytest.mark.parametrize("model", ["org/m:", "org/m:Q4 K", "org/m:a:b", "org/m:../x"])
+def test_malformed_quantizations_are_refused(model):
+    with pytest.raises(ex.TransportError):
+        ex._validate_model_id(model)

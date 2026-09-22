@@ -26,6 +26,8 @@ class Spec:
     def validate(self) -> None:
         if not self.model or not isinstance(self.model, str):
             raise SpecError("model is required")
+        if self.runtime == "vllm" and ":" in self.model:
+            raise SpecError("choosing a quantization (':Q4_K_M') is for GGUF models on llama.cpp")
         if self.runtime not in ("vllm", "llama"):
             raise SpecError("runtime must be 'vllm' or 'llama'")
         if self.target not in ("local", "aws"):

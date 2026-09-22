@@ -290,6 +290,7 @@ function onDeployModalOpen() {}
 
 function setRuntime(r) {
   selectedRuntime = r;
+  setTimeout(refreshQuants);
   document.querySelectorAll(".runtime-card").forEach((b) => {
     b.classList.toggle("active", b.dataset.runtime === r);
   });
@@ -388,7 +389,8 @@ async function openRedeploy(id) {
 
 async function applyFit(prevModel) {
   const input = document.getElementById("f_model");
-  const model = input.value.trim();
+  refreshQuants();
+  const model = modelWithQuant();
   if (!model || model === prevModel) return;
   const hint = document.getElementById("f_model_hint");
   try {
@@ -430,6 +432,75 @@ function setModelField(model) {
   input.value = model;
   applyFit(prev);
 }
+
+/* ---- quantization: which GGUF file of the repo, as `org/name:Q4_K_S` ----
+   llama.cpp's own naming. The list comes straight from Hugging Face; "Auto"
+   leaves the choice to the agent, which prefers the same order as below. */
+const DEFAULT_QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "Q4_0", "Q1_0"];
+let quantRepo = null;
+
+function ggufQuant(file) {
+  const stem = file.split("/").pop().replace(/\.gguf$/i, "");
+  const m = stem.match(/((?:UD-)?(?:I?Q\d[A-Z0-9_]*|BF16|F16|F32))$/i);
+  return m ? m[1] : null;
+}
+
+function modelWithQuant() {
+  const repo = document.getElementById("f_model").value.trim().split(":")[0];
+  const row = document.getElementById("quant_row");
+  const quant = row.classList.contains("hidden") ? "" : document.getElementById("f_quant").value;
+  return repo && quant ? `${repo}:${quant}` : repo;
+}
+
+async function refreshQuants() {
+  const input = document.getElementById("f_model");
+  const row = document.getElementById("quant_row");
+  const select = document.getElementById("f_quant");
+  const [repo, wanted] = input.value.trim().split(":");
+  if (selectedRuntime !== "llama" || !/^[\w.-]+\/[\w.-]+$/.test(repo || "")) {
+    row.classList.add("hidden"); quantRepo = null; return;
+  }
+  if (repo === quantRepo) { if (wanted) select.value = wanted; return; }
+  quantRepo = repo;
+  row.classList.add("hidden");                // the old repo's list is not this one's
+  let files = [];
+  try {
+    const res = await fetch(`https://huggingface.co/api/models/${repo}?blobs=true`);
+    if (res.ok) files = (await res.json()).siblings || [];
+  } catch { /* offline or private: Auto still works */ }
+  if (quantRepo !== repo) return;             // the user moved on meanwhile
+  const quants = files
+    .filter((f) => /\.gguf$/i.test(f.rfilename) && !/mmproj/i.test(f.rfilename)
+                   && !/-\d{5}-of-\d{5}\.gguf$/i.test(f.rfilename))
+    .map((f) => ({ q: ggufQuant(f.rfilename), size: f.size || 0 }))
+    .filter((f) => f.q)
+    .sort((a, b) => a.size - b.size);
+  if (!quants.length) { row.classList.add("hidden"); return; }
+  const gb = (n) => n ? ` · ${(n / 2 ** 30).toFixed(1)} GB` : "";
+  const auto = DEFAULT_QUANTS.map((d) => quants.find((x) => x.q.toLowerCase() === d.toLowerCase()))
+    .find(Boolean) || quants[0];
+  select.innerHTML = `<option value="">Auto — ${escapeHtml(auto.q)}${gb(auto.size)}</option>` +
+    quants.map((x) => `<option value="${escapeHtml(x.q)}">${escapeHtml(x.q)}${gb(x.size)}</option>`).join("");
+  select.value = wanted && quants.some((x) => x.q === wanted) ? wanted : "";
+  row.classList.remove("hidden");
+}
+
+/* A Hugging Face link pasted as is: the repo, and the quantization of the
+   file when the link points at one. */
+function fromHfLink(text) {
+  const m = text.trim().match(/huggingface\.co\/([\w.-]+\/[\w.-]+)(?:\/(?:blob|resolve)\/[^/]+\/(.+\.gguf))?/i);
+  if (!m) return text.trim();
+  const q = m[2] ? ggufQuant(m[2]) : null;
+  return q ? `${m[1]}:${q}` : m[1];
+}
+
+document.getElementById("f_model").addEventListener("change", (e) => {
+  e.target.value = fromHfLink(e.target.value);
+  // a link to one file of a GGUF repo only makes sense on llama.cpp
+  if (e.target.value.includes(":") && selectedRuntime !== "llama") setRuntime("llama");
+  applyFit("");
+});
+document.getElementById("f_quant").addEventListener("change", () => applyFit(""));
 
 /* ---- dashboard ---- */
 const STATUS_LABEL = {
@@ -697,7 +768,7 @@ async function refreshLogs() {
 async function deploy() {
   if (creating) return;
   const payload = {
-    model: document.getElementById("f_model").value.trim(),
+    model: modelWithQuant(),
     runtime: selectedRuntime,
     target: selectedTarget,
     gpus: parseInt(document.getElementById("f_gpus").value, 10) || 1,

@@ -70,3 +70,10 @@ def test_from_dict_ignores_unknown_keys():
 
 def test_api_key_travels_to_the_agent():
     assert Spec(model="org/m", api_key="sk-sursum-abc").to_dict()["api_key"] == "sk-sursum-abc"
+
+
+def test_a_quantization_is_refused_on_vllm():
+    """vLLM loads safetensors; `:Q4_K_M` names a GGUF file for llama.cpp."""
+    with pytest.raises(SpecError, match="llama"):
+        Spec(model="unsloth/Qwen3.6-27B-GGUF:Q4_K_S", runtime="vllm").validate()
+    Spec(model="unsloth/Qwen3.6-27B-GGUF:Q4_K_S", runtime="llama").validate()

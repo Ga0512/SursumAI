@@ -132,6 +132,7 @@ web/server.py (3000, estático + proxy /api) ──► central/app.py (8001) ─
 - **vLLM** — docker `vllm/vllm-openai:v0.21.0`, exige NVIDIA + Docker. Rejeita repo GGUF-only (precisa de safetensors).
 - **llama-server (híbrido)** — com NVIDIA (`nvidia-smi`): docker `ghcr.io/ggml-org/llama.cpp:server-cuda`. Sem NVIDIA: binário nativo do release oficial **pinado** (`BIN_VERSION`, sha256 conferido via GitHub API) baixado em `llama-bin/`. Detecta `libcuda` para build CUDA nativa sem Docker. A imagem é a **`:server-cuda`** (a `:server` é só-CPU: com ela o card ficava em 0 MiB) e o comando leva **`-ngl auto`**, nunca um número fixo — `auto` deixa o `--fit` do llama.cpp dividir entre GPU e CPU um modelo maior que a VRAM, e um número fixo desliga isso. `--cache-ram` é limitado a 1/8 da RAM: o padrão de 8 GB é maior que o WSL e o servidor morria por OOM sob tráfego contínuo.
 - GGUF vai para `llama-models/<org>--<model>/`, magic bytes `GGUF` validados. VLM detectado por `mmproj-*.gguf`.
+- Quantização escolhida como `org/nome:Q4_K_S` (o mesmo formato do `-hf` do llama.cpp); sem sufixo, `DEFAULT_QUANTS` decide. O modal lista as quantizações direto da API do Hugging Face e aceita o link do arquivo colado. Arquivos divididos (`-00001-of-0000N`) não são escolhidos. vLLM recusa o sufixo.
 - `llama-bin/`, `llama-models/`, `sursumai.db*` e `sursumai-logs/` são ignorados pelo git.
 
 ### Endereçamento OpenAI

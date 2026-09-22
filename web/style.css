@@ -670,6 +670,8 @@ select.input, .select { cursor: pointer; }
 .model-static.selected .pmd-check { visibility: visible; }
 
 .hint { font-size: 0.78rem; color: var(--text-muted); }
+.quant-row { margin-top: var(--s2); display: grid; gap: 4px; }
+.quant-row.hidden { display: none; }
 .opt { font-weight: 400; color: var(--text-muted); }
 
 /* --- config grid ------------------------------------------------------ */

@@ -69,7 +69,7 @@ BIN_REPO = "ggml-org/llama.cpp"
 BIN_API = f"https://api.github.com/repos/{BIN_REPO}/releases/tags/{BIN_VERSION}"
 DEFAULT_QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "Q4_0", "Q1_0"]
 
-MODEL_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+MODEL_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)?$")
 
 
 class TransportError(Exception):
@@ -428,15 +428,35 @@ def _binary_stop(deploy_id: str) -> None:
 def _validate_model_id(model: str) -> str:
     if not MODEL_ID_RE.match(model):
         raise TransportError(
-            f"invalid model id '{model}': expected 'org/name' (letters, digits, '-', '_', '.')"
+            f"invalid model id '{model}': expected 'org/name' or 'org/name:QUANT' "
+            "(letters, digits, '-', '_', '.')"
         )
     return model
 
 
-def _pick_gguf(filenames: list[str]) -> str | None:
-    gguFs = [f for f in filenames if f.endswith(".gguf") and "mmproj" not in f.lower()]
+def split_quant(model: str) -> tuple[str, str | None]:
+    """`org/name:Q4_K_S` -> ("org/name", "Q4_K_S"), the way llama.cpp's own
+    `-hf` names a file inside a repo. No suffix: we pick (DEFAULT_QUANTS)."""
+    repo, _, quant = model.partition(":")
+    return repo, (quant or None)
+
+
+def gguf_quant(filename: str) -> str | None:
+    """The quantization a GGUF file name ends with: `Qwen3.6-27B-UD-Q4_K_XL.gguf`
+    -> "UD-Q4_K_XL". Split files are not picked (see _pick_gguf)."""
+    stem = filename.rsplit("/", 1)[-1][:-len(".gguf")]
+    m = re.search(r"((?:UD-)?(?:I?Q\d[A-Z0-9_]*|BF16|F16|F32))$", stem, re.I)
+    return m.group(1) if m else None
+
+
+def _pick_gguf(filenames: list[str], quant: str | None = None) -> str | None:
+    gguFs = [f for f in filenames if f.endswith(".gguf") and "mmproj" not in f.lower()
+             and not re.search(r"-\d{5}-of-\d{5}\.gguf$", f)]
     if not gguFs:
         return None
+    if quant:
+        chosen = [f for f in gguFs if (gguf_quant(f) or "").lower() == quant.lower()]
+        return sorted(chosen, key=len)[0] if chosen else None
     for q in DEFAULT_QUANTS:
         for f in gguFs:
             if q in f:
@@ -453,7 +473,7 @@ def _pick_mmproj(filenames: list[str]) -> str | None:
 
 def resolve_model(spec: Spec) -> dict:
     """Inspect the HF repo and return GGUF + optional mmproj (vision encoder)."""
-    model = _validate_model_id(spec.model)
+    model, quant = split_quant(_validate_model_id(spec.model))
     api = HfApi(token=spec.hf_token or None)
     try:
         info = api.model_info(model)
@@ -462,8 +482,13 @@ def resolve_model(spec: Spec) -> dict:
     except Exception as e:
         raise TransportError(f"could not reach Hugging Face: {e}") from None
     files = [s.rfilename for s in info.siblings]
-    gguf = _pick_gguf(files)
+    gguf = _pick_gguf(files, quant)
     mmproj = _pick_mmproj(files)
+    if gguf is None and quant:
+        have = sorted({q for f in files if f.endswith(".gguf") and "mmproj" not in f.lower()
+                       for q in [gguf_quant(f)] if q})
+        raise TransportError(
+            f"'{model}' has no {quant} file" + (f" — it has {', '.join(have)}" if have else ""))
     if gguf is None:
         raise TransportError(
             f"no GGUF file found in '{model}' — llama runtime needs a GGUF (quantized) repo"
