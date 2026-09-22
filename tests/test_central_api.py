@@ -561,3 +561,24 @@ def test_a_pool_is_addressable_by_its_name(client, monkeypatch):
                              "messages": [{"role": "user", "content": "hi"}]},
                        headers=_auth(key)).json()
     assert body["choices"][0]["message"]["content"] == "pooled"
+
+
+# ---- uninstall from the page ----
+
+def test_uninstalling_from_the_page_asks_for_the_password(client, monkeypatch):
+    import subprocess
+    started = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: started.append(a))
+    token = _register(client)
+
+    resp = client.post("/meta/uninstall", json={"password": "wrongwrongwrong"}, headers=_auth(token))
+    assert resp.status_code == 403 and started == []
+
+    resp = client.post("/meta/uninstall", json={"password": "hunter2hunter2"}, headers=_auth(token))
+    assert resp.status_code == 200
+    assert "uninstall" in started[0][0][2] and "--yes" in started[0][0][2]
+
+
+def test_uninstall_and_update_need_a_session(client):
+    assert client.post("/meta/uninstall", json={"password": "x"}).status_code == 401
+    assert client.post("/meta/update").status_code == 401

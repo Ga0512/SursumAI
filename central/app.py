@@ -129,6 +129,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UninstallRequest(BaseModel):
+    password: str
+
+
 class DeployRequest(BaseModel):
     model: str
     runtime: str = "vllm"
@@ -479,10 +483,8 @@ async def meta_update():
 
 
 @app.post("/meta/update")
-async def meta_update_apply():
-    """Re-run the installer in the background to update the codebase.
-    The installer ends by starting SursumAI, so the services come back up
-    on the new version automatically."""
+async def meta_update_apply(user=Depends(_current_user)):
+    """Re-run the installer in the background, then restart on the new code."""
     import subprocess as sp
     latest = await asyncio.to_thread(_latest_version)
     if latest == "?":
@@ -493,7 +495,9 @@ async def meta_update_apply():
     env = {**os.environ, "SURSUMAI_VERSION": tag}
     try:
         sp.Popen(
-            ["bash", "-c", f"{fetch} | bash"], env=env,
+            # the installer only replaces the code; the restart is what makes
+            # the processes serve it (the CLI would otherwise see them up)
+            ["bash", "-c", f'{fetch} | bash && exec "$HOME/.local/bin/sursumai" restart'], env=env,
             stdout=sp.DEVNULL, stderr=sp.DEVNULL,
             start_new_session=True,
         )
@@ -501,6 +505,26 @@ async def meta_update_apply():
         raise HTTPException(status_code=502, detail=f"update failed to start: {e}") from e
     return {"status": "started", "version": latest,
             "note": "SursumAI will restart after the update"}
+
+
+@app.post("/meta/uninstall")
+async def meta_uninstall(req: UninstallRequest, user=Depends(_current_user)):
+    """Remove SursumAI from this computer (`sursumai uninstall`), from the page.
+
+    The password again, not just the session: this deletes the database and
+    the downloaded models. Started detached and a moment later, so this answer
+    reaches the page before the CLI stops the process sending it."""
+    import subprocess as sp
+    import sys
+    if not authmod.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="wrong password")
+    cli = Path(__file__).resolve().parent.parent / "sursumai" / "bin" / "sursumai"
+    try:
+        sp.Popen(["bash", "-c", 'sleep 2; exec "$0" "$1" uninstall --yes', sys.executable, str(cli)],
+                 stdout=sp.DEVNULL, stderr=sp.DEVNULL, start_new_session=True)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"could not start the uninstall: {e}") from e
+    return {"status": "started"}
 
 
 # ---- the SursumAI account (Pro) ----

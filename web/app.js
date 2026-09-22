@@ -1218,6 +1218,40 @@ function escapeHtml(s) {
 }
 
 /* ---- dashboard tabs (deploys / chat) ---- */
+/* ---- settings ---- */
+async function loadSettings() {
+  try {
+    const d = await (await fetch(`${API}/meta/update`)).json();
+    document.getElementById("settingsVersion").textContent = d.current ? `v${d.current}` : "";
+  } catch { /* the version is a nicety */ }
+}
+
+async function uninstallApp() {
+  const input = document.getElementById("uninstallPassword");
+  const btn = document.getElementById("uninstallBtn");
+  if (!input.value) { input.focus(); return; }
+  btn.disabled = true;
+  btn.textContent = "Uninstalling…";
+  try {
+    const res = await fetch(`${API}/meta/uninstall`, {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ password: input.value }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(d.detail === "wrong password" ? "Wrong password" : (d.detail || "Could not uninstall"));
+      btn.disabled = false; btn.textContent = "Uninstall";
+      return;
+    }
+  } catch {
+    toast("Could not reach server"); btn.disabled = false; btn.textContent = "Uninstall"; return;
+  }
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  document.body.innerHTML = `<div class="uninstalled"><h1>SursumAI was removed</h1>
+    <p>Everything is gone from this computer. You can close this tab.</p>
+    <p class="muted">To install it again, run the install command from the SursumAI site.</p></div>`;
+}
+
 function switchDash(view) {
   document.querySelectorAll(".dash-tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.view === view));
@@ -1225,6 +1259,7 @@ function switchDash(view) {
   document.getElementById("poolsView").classList.toggle("hidden", view !== "pools");
   document.getElementById("chatView").classList.toggle("hidden", view !== "chat");
   document.getElementById("keysView").classList.toggle("hidden", view !== "keys");
+  document.getElementById("settingsView").classList.toggle("hidden", view !== "settings");
   // views added by the Pro module carry this class and their own data-view
   document.querySelectorAll(".pro-view").forEach((el) =>
     el.classList.toggle("hidden", el.dataset.view !== view));
@@ -1232,6 +1267,7 @@ function switchDash(view) {
   if (view === "chat") loadChat();
   if (view === "pools") loadPoolsView();
   if (view === "keys") loadApiKeys();
+  if (view === "settings") loadSettings();
   onProView(view);
 }
 

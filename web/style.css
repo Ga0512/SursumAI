@@ -1085,3 +1085,9 @@ select.input, .select { cursor: pointer; }
   border: 1px solid #bfe3d4; border-radius: 999px;
   padding: 4px 12px; font-size: 0.8rem; font-weight: 600;
 }
+
+.danger-zone { border: 1px solid #e5a9ba; border-radius: var(--r-md, 10px); padding: var(--s4); max-width: 640px; }
+.danger-zone h3 { margin: 0 0 var(--s2); color: var(--red, #c1274f); font-size: 1rem; }
+.danger-zone p { margin: 0 0 var(--s3); font-size: 0.875rem; color: var(--text-soft); }
+.danger-zone .keys-new { margin: 0; }
+.uninstalled { max-width: 520px; margin: 18vh auto; padding: 0 16px; text-align: center; }

@@ -19,6 +19,7 @@ Commands:
   sursumai pools         table of pools
   sursumai destroy <id> [--yes]
   sursumai update [--yes] [--version vX.Y.Z]
+  sursumai uninstall [--yes]
 
 Every command exits non-zero on failure, and prints a human sentence rather
 than a traceback. Add --json to the read commands for machine-readable output.
@@ -543,6 +544,85 @@ def cmd_update(args: argparse.Namespace) -> None:
     ok(f"updated to {tag.lstrip('v')}. run `sursumai` to start")
 
 
+def _stop_models() -> None:
+    """Stop every model this machine is running: they outlive `sursumai stop`
+    on purpose, so an uninstall that skipped them would leave a GPU busy with
+    nothing left to manage it."""
+    logs = SURSUMAI_ROOT / "sursumai-logs"
+    for pid_file in logs.glob("*.pid") if logs.is_dir() else []:
+        try:
+            os.kill(int(pid_file.read_text().strip()), 15)
+        except (ValueError, OSError):
+            pass
+    try:
+        # the executors name every container deploy-<id>; the image check
+        # keeps a stranger's "deploy-…" container out of it
+        out = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "name=^deploy-", "--format", "{{.ID}} {{.Image}}"],
+            capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    ids = [line.split()[0] for line in out.splitlines()
+           if len(line.split()) == 2 and ("vllm" in line.split()[1] or "llama.cpp" in line.split()[1])]
+    if ids:
+        subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, timeout=120)
+
+
+def _uninstall_paths() -> list[Path]:
+    home = Path.home()
+    paths = [
+        home / ".sursumai",                                  # account, Pro module, keys
+        Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share") / "sursumai",  # the database
+        CONFIG_DIR,                                          # the CLI's login
+        home / ".local/bin/sursumai",
+        home / ".local/share/icons/sursumai.svg",
+        home / ".local/share/applications/sursumai.desktop",
+        home / "Applications/SursumAI.app",
+        LOG_DIR,
+    ]
+    if os.environ.get("WSL_DISTRO_NAME"):
+        try:
+            profile = subprocess.run(["cmd.exe", "/c", "echo %USERPROFILE%"], capture_output=True,
+                                     text=True, timeout=15).stdout.strip()
+            win = subprocess.run(["wslpath", "-u", profile], capture_output=True,
+                                 text=True, timeout=15).stdout.strip()
+            if win:
+                w = Path(win)
+                paths += [w / ".sursumai", w / "Desktop/SursumAI.lnk", w / "Desktop/sursumai.bat"]
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    # the app itself — unless this is a git checkout someone develops in
+    if not (SURSUMAI_ROOT / ".git").exists():
+        paths.append(SURSUMAI_ROOT)
+    return paths
+
+
+def cmd_uninstall(args: argparse.Namespace) -> None:
+    import shutil
+
+    if not args.yes:
+        print("This removes SursumAI from this computer: the app, its database (local")
+        print("accounts, deploys, pools, API keys), downloaded models and the Pro sign-in.")
+        print("Models running now are stopped. A Pro subscription is NOT cancelled, and")
+        print("machines added over SSH are left as they are.")
+        if input("type 'uninstall' to confirm: ").strip().lower() != "uninstall":
+            print("aborted")
+            return
+    _stop_models()
+    cmd_stop(args)
+    for path in _uninstall_paths():
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+        except OSError as e:
+            warn(f"could not remove {path}: {e}")
+    ok("SursumAI was removed. To install it again:")
+    print(f"  curl -fsSL {REPO_URL}/raw/v{_local_version()}/install.sh | bash"
+          if _local_version() != "?" else f"  see {REPO_URL}")
+
+
 # ---------- main ----------
 
 COMMANDS = {
@@ -561,6 +641,7 @@ COMMANDS = {
     "chat": cmd_chat,
     "destroy": cmd_destroy,
     "update": cmd_update,
+    "uninstall": cmd_uninstall,
 }
 
 
@@ -630,6 +711,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_update = add("update", "update SursumAI to the latest release")
     p_update.add_argument("--yes", action="store_true", help="skip confirmation")
     p_update.add_argument("--version", default=None, help="install a specific tag")
+
+    p = add("uninstall", "remove SursumAI from this computer")
+    p.add_argument("--yes", action="store_true", help="skip confirmation")
 
     return parser
 

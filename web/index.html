@@ -50,6 +50,7 @@
           <button class="dash-tab" data-view="pools" onclick="switchDash('pools')">Pools</button>
           <button class="dash-tab" data-view="chat" onclick="switchDash('chat')">Playground</button>
           <button class="dash-tab" data-view="keys" onclick="switchDash('keys')">API keys</button>
+          <button class="dash-tab" data-view="settings" onclick="switchDash('settings')">Settings</button>
         </div>
         <div>
           <button class="btn btn-primary hidden" id="poolBtn" onclick="openPoolModal()">+ New pool</button>
@@ -87,6 +88,25 @@
           </div>
         </div>
         <div id="keysList" class="keys-list"></div>
+      </div>
+      <div id="settingsView" class="hidden">
+        <div class="keys-intro">
+          <p>SursumAI <span id="settingsVersion"></span> on this computer.</p>
+        </div>
+        <div class="danger-zone">
+          <h3>Uninstall SursumAI</h3>
+          <p>Removes SursumAI from this computer: the app, its database (local accounts,
+             deployments, pools, API keys), downloaded models and the Pro sign-in. Models
+             running now are stopped.</p>
+          <p class="muted">A Pro subscription is not cancelled — manage it on your account
+             page. Machines added over SSH are left as they are.</p>
+          <div class="keys-new">
+            <input class="input" id="uninstallPassword" type="password"
+                   placeholder="Your password, to confirm" autocomplete="current-password"
+                   onkeydown="if(event.key==='Enter')uninstallApp()">
+            <button class="btn btn-danger" id="uninstallBtn" onclick="uninstallApp()">Uninstall</button>
+          </div>
+        </div>
       </div>
       <div id="chatView" class="hidden">
         <div class="chat-area">
