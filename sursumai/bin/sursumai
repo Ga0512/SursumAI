@@ -233,7 +233,12 @@ def _start_processes() -> None:
                 stdout=logf, stderr=subprocess.STDOUT, start_new_session=True,
             )
 
-    deadline = time.time() + 20
+    # the first start after an install compiles every module and fetches the
+    # Pro module: well past 20 s on a laptop, which reported a failure for
+    # services that came up a few seconds later
+    deadline = time.time() + 90
+    if _down():
+        print("starting SursumAI…")
     while time.time() < deadline and _down():
         time.sleep(0.5)
     missing = _down()
