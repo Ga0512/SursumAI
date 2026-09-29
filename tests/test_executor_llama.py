@@ -533,3 +533,58 @@ def test_model_ids_with_a_quantization_are_valid(model):
 def test_malformed_quantizations_are_refused(model):
     with pytest.raises(ex.TransportError):
         ex._validate_model_id(model)
+
+
+# ---- Advanced: the overrides reach the command line, and only when set ----
+
+def _llama_cmd(**kw):
+    spec = Spec(model="org/m-GGUF", runtime="llama", **kw)
+    spec.validate()
+    return ex._binary_build_cmd(spec, "d" * 32, {"gguf": "/m/x.gguf"}, "llama-server")
+
+
+def test_a_deploy_with_no_overrides_looks_exactly_as_before():
+    cmd = " ".join(_llama_cmd())
+    for flag in ("--cache-type-k", "--parallel", "--top-p", "--repeat-penalty", "--flash-attn"):
+        assert flag not in cmd
+
+
+def test_the_kv_cache_choice_shrinks_both_halves():
+    """Only k would leave v in f16 and save half of what the user asked for."""
+    cmd = _llama_cmd(kv_cache="q8_0")
+    assert cmd[cmd.index("--cache-type-k") + 1] == "q8_0"
+    assert cmd[cmd.index("--cache-type-v") + 1] == "q8_0"
+
+
+def test_threads_and_parallel_go_through():
+    cmd = _llama_cmd(threads=12, parallel=4)
+    assert cmd[cmd.index("-t") + 1] == "12"
+    assert cmd[cmd.index("--parallel") + 1] == "4"
+
+
+def test_threads_default_to_the_machine_when_unset():
+    assert "-t" in _llama_cmd()
+
+
+def test_gpu_layers_stay_auto_unless_pinned():
+    """`auto` is what lets a model bigger than the card run split; a number
+    turns that off, so it has to be the user's decision."""
+    assert ex._gpu_layers(Spec(model="a/b", runtime="llama")) == "auto"
+    assert ex._gpu_layers(Spec(model="a/b", runtime="llama", gpu_layers="20")) == "20"
+
+
+def test_flash_attention_is_only_asked_for_when_it_was_asked_for():
+    assert "--flash-attn" in _llama_cmd(flash_attn=True)
+    assert "--flash-attn" not in " ".join(_llama_cmd(flash_attn=False))
+
+
+@pytest.mark.parametrize("kw,message", [
+    ({"kv_cache": "q3_k"}, "KV cache"),
+    ({"parallel": 0}, "parallel"),
+    ({"threads": 999}, "threads"),
+    ({"gpu_layers": "most"}, "GPU layers"),
+    ({"top_p": 2}, "top_p"),
+])
+def test_a_value_that_would_break_the_server_is_refused_here(kw, message):
+    with pytest.raises(Exception, match=message):
+        _llama_cmd(**kw)

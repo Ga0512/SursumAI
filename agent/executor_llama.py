@@ -624,6 +624,34 @@ def _is_gguf(path: Path) -> bool:
 
 # ---- commands ----
 
+def _advanced_args(spec: Spec) -> list[str]:
+    """The Advanced overrides, as llama.cpp flags. Empty when nothing was set,
+    which is how nearly every deploy runs."""
+    args: list[str] = []
+    if spec.kv_cache:
+        # both halves of the cache, so 32k of context fits where 16k did
+        args += ["--cache-type-k", spec.kv_cache, "--cache-type-v", spec.kv_cache]
+    if spec.parallel:
+        args += ["--parallel", str(spec.parallel)]
+    if spec.top_p is not None:
+        args += ["--top-p", str(spec.top_p)]
+    if spec.repeat_penalty is not None:
+        args += ["--repeat-penalty", str(spec.repeat_penalty)]
+    if spec.flash_attn:
+        args += ["--flash-attn", "on"]
+    return args
+
+
+def _threads(spec: Spec) -> str:
+    return str(spec.threads) if spec.threads else str(max(2, min(spec.gpus * 4, 16)))
+
+
+def _gpu_layers(spec: Spec) -> str:
+    """`auto` unless the user pinned a number — see the note in the docker
+    command: a fixed count turns llama.cpp's fitting off."""
+    return spec.gpu_layers or "auto"
+
+
 def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list[str]:
     port = deploy_port(deploy_id, spec)
     model_dir = Path(paths["gguf"]).parent
@@ -646,18 +674,18 @@ def _docker_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str]) -> list
         "--port", "8080",
         "--ctx-size", str(max(spec.max_model_len, 128)),
         "-n", str(spec.max_tokens),
-        "-t", str(max(2, min(spec.gpus * 4, 16))),
+        "-t", _threads(spec),
         "--metrics",
         "--cache-reuse", "1",
         "--cache-ram", str(_cache_ram_mib()),
-    ]
+    ] + _advanced_args(spec)
     # Offload as many layers as the card holds and no more. "auto" leaves
     # llama.cpp's --fit free to size the offload to free VRAM, so a model
     # bigger than the card (an 8B on 6 GB) runs split across GPU and CPU
     # instead of failing to load. A fixed count like 999 pins the value and
     # switches that fitting off.
     if on_gpu:
-        cmd += ["-ngl", "auto"]
+        cmd += ["-ngl", _gpu_layers(spec)]
     if spec.api_key:
         cmd += ["--api-key-file", CONTAINER_KEY]
     if paths.get("mmproj"):
@@ -674,13 +702,13 @@ def _binary_build_cmd(spec: Spec, deploy_id: str, paths: dict[str, str], exe: st
         "--port", str(port),
         "--ctx-size", str(max(spec.max_model_len, 128)),
         "-n", str(spec.max_tokens),
-        "-t", str(max(2, min(spec.gpus * 4, 16))),
+        "-t", _threads(spec),
         "--metrics",
         "--cache-reuse", "1",
         "--cache-ram", str(_cache_ram_mib()),
-    ]
+    ] + _advanced_args(spec)
     if _runtime_strategy() in ("vulkan", "cuda"):
-        cmd += ["-ngl", "auto"]   # fit to free VRAM, see _docker_build_cmd
+        cmd += ["-ngl", _gpu_layers(spec)]   # fit to free VRAM, see _docker_build_cmd
     # only the path reaches argv; the key itself stays in a 0600 file
     if spec.api_key:
         cmd += ["--api-key-file", _write_key_file(deploy_id, spec.api_key)]

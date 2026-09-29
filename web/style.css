@@ -675,7 +675,9 @@ select.input, .select { cursor: pointer; }
 .opt { font-weight: 400; color: var(--text-muted); }
 
 /* --- config grid ------------------------------------------------------ */
-.cfg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+.cfg-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+/* a long hint must wrap, not push the modal sideways */
+.cfg-grid .field, .cfg-grid .input, .cfg-grid select { min-width: 0; max-width: 100%; }
 .hf-field { margin-top: var(--s3); }
 .modal .fields { display: flex; flex-direction: column; gap: var(--s4); margin-bottom: var(--s5); }
 /* modals that list .field directly (the pool modal) get the same rhythm */
@@ -1094,3 +1096,9 @@ select.input, .select { cursor: pointer; }
 
 .runtime-card.disabled { opacity: 0.55; cursor: not-allowed; }
 .runtime-card .rwhy { display: block; margin-top: var(--s2); font-size: 0.75rem; color: var(--red, #c1274f); }
+
+.tuning-reset { margin-left: auto; }
+.sec-head { display: flex; align-items: center; gap: var(--s2); }
+.fhint { display: block; margin-top: 4px; font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
+.field-check label { display: flex; align-items: center; gap: 8px; }
+.field.hidden { display: none; }

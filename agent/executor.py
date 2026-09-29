@@ -65,7 +65,33 @@ def build_cmd(spec: Spec, deploy_id: str) -> list[str]:
         "--tensor-parallel-size", str(spec.gpus),
         "--enable-prefix-caching",
     ]
+    cmd += _advanced_args(spec)
     return cmd
+
+
+def _advanced_args(spec: Spec) -> list[str]:
+    """The Advanced overrides, as vLLM flags. Empty unless the user set one.
+
+    `--kv-cache-dtype` takes fp8 where llama.cpp takes q8_0; the modal offers
+    one list for both runtimes and the translation happens here, so the words
+    on screen never have to be a runtime's spelling."""
+    args: list[str] = []
+    kv = {"q8_0": "fp8", "q4_0": "fp8", "f16": "auto"}.get(spec.kv_cache)
+    if kv:
+        args += ["--kv-cache-dtype", kv]
+    if spec.quantization:
+        args += ["--quantization", spec.quantization]
+    if spec.trust_remote_code:
+        # several new models ship their own modelling code and simply refuse to
+        # load without this
+        args += ["--trust-remote-code"]
+    if spec.max_num_seqs or spec.parallel:
+        args += ["--max-num-seqs", str(spec.max_num_seqs or spec.parallel)]
+    if spec.swap_space is not None:
+        args += ["--swap-space", str(spec.swap_space)]
+    # top_p and repeat_penalty are not server flags in vLLM: they are sampling
+    # values sent per request, so the modal offers them on llama.cpp only
+    return args
 
 
 def runtime_env(spec: Spec) -> dict[str, str]:

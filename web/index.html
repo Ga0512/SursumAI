@@ -223,6 +223,87 @@
             <input id="f_hf_token" class="input" type="password" placeholder="hf_..." autocomplete="off" />
           </div>
         </div>
+
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-num">4</span><span class="sec-title">Tuning</span>
+            <button type="button" class="btn btn-ghost btn-sm tuning-reset"
+                    onclick="resetTuning()">Reset to automatic</button>
+          </div>
+          <p class="hint">Every field here is optional. Left alone, the runtime picks what
+             fits your machine — that is what almost every deployment uses.</p>
+          <div class="cfg-grid">
+            <div class="field">
+              <label>Name</label>
+              <input id="f_name" class="input" maxlength="60" placeholder="e.g. Qwen 27B fast" />
+              <span class="fhint">What you call it in the dashboard. The model id is used when empty.</span>
+            </div>
+            <div class="field">
+              <label>KV cache</label>
+              <select id="f_kv" class="input">
+                <option value="">Automatic</option>
+                <option value="f16">f16 — full precision</option>
+                <option value="q8_0">q8_0 — half the memory</option>
+                <option value="q4_0">q4_0 — a quarter, lower quality</option>
+              </select>
+              <span class="fhint">Shrinks what the context costs in memory, so a longer
+                conversation fits on the same card.</span>
+            </div>
+            <div class="field">
+              <label>Conversations at once</label>
+              <input id="f_parallel" class="input" type="number" min="1" max="256" placeholder="auto" />
+              <span class="fhint">More serves several people at the same time; each one takes
+                its slice of the context.</span>
+            </div>
+            <div class="field llama-only">
+              <label>Top-p</label>
+              <input id="f_top_p" class="input" type="number" step="0.05" min="0.05" max="1" placeholder="auto" />
+              <span class="fhint">Lower keeps the model to the likeliest words.</span>
+            </div>
+            <div class="field llama-only">
+              <label>Repeat penalty</label>
+              <input id="f_repeat" class="input" type="number" step="0.05" min="0.05" max="5" placeholder="auto" />
+              <span class="fhint">Above 1 pushes the model away from repeating itself.</span>
+            </div>
+            <div class="field llama-only">
+              <label>GPU layers</label>
+              <input id="f_ngl" class="input" placeholder="auto" />
+              <span class="fhint">Automatic splits a model bigger than your VRAM between GPU
+                and CPU. A number turns that off.</span>
+            </div>
+            <div class="field llama-only">
+              <label>CPU threads</label>
+              <input id="f_threads" class="input" type="number" min="1" max="256" placeholder="auto" />
+              <span class="fhint">Matters when part of the model runs on the CPU.</span>
+            </div>
+            <div class="field llama-only field-check">
+              <label><input id="f_flash" type="checkbox" /> Flash attention</label>
+              <span class="fhint">Faster and lighter on recent NVIDIA cards.</span>
+            </div>
+            <div class="field vllm-only">
+              <label>Quantization</label>
+              <select id="f_quantization" class="input">
+                <option value="">None (full weights)</option>
+                <option value="awq">AWQ</option>
+                <option value="gptq">GPTQ</option>
+                <option value="fp8">FP8</option>
+                <option value="bitsandbytes">bitsandbytes</option>
+                <option value="gguf">GGUF</option>
+              </select>
+              <span class="fhint">Only for a repo that was published quantized that way.</span>
+            </div>
+            <div class="field vllm-only">
+              <label>Swap space (GiB)</label>
+              <input id="f_swap" class="input" type="number" min="0" max="128" placeholder="auto" />
+              <span class="fhint">CPU memory to fall back on when the GPU fills up.</span>
+            </div>
+            <div class="field vllm-only field-check">
+              <label><input id="f_trust" type="checkbox" /> Trust remote code</label>
+              <span class="fhint">Some models only load with this. It runs code from the
+                repository, so turn it on for models you trust.</span>
+            </div>
+          </div>
+        </div>
       </details>
 
       <button id="deployBtn" class="btn btn-primary" style="width:100%" onclick="deploy()">Deploy</button>

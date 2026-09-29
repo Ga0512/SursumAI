@@ -144,6 +144,19 @@ class DeployRequest(BaseModel):
     max_tokens: int = 2048
     temperature: float = 0.0
     hf_token: str = ""
+    # Advanced: unset means the runtime decides, which is how most deploys run
+    name: str = ""
+    kv_cache: str = ""
+    parallel: int | None = None
+    top_p: float | None = None
+    repeat_penalty: float | None = None
+    gpu_layers: str = ""
+    threads: int | None = None
+    flash_attn: bool | None = None
+    quantization: str = ""
+    trust_remote_code: bool = False
+    max_num_seqs: int | None = None
+    swap_space: int | None = None
     # None runs on this machine; anything else needs SursumAI Pro
     machine_id: str | None = None
 
@@ -159,6 +172,18 @@ class RedeployRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     hf_token: str | None = None
+    name: str | None = None
+    kv_cache: str | None = None
+    parallel: int | None = None
+    top_p: float | None = None
+    repeat_penalty: float | None = None
+    gpu_layers: str | None = None
+    threads: int | None = None
+    flash_attn: bool | None = None
+    quantization: str | None = None
+    trust_remote_code: bool | None = None
+    max_num_seqs: int | None = None
+    swap_space: int | None = None
 
 
 class ChatRequest(BaseModel):
@@ -227,8 +252,16 @@ def _api_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
     return user
 
 
+# Advanced numbers where 0 means "back to automatic". Without this a redeploy
+# could raise a value but never clear it: None means "keep what it had".
+_AUTO_AT_ZERO = ("parallel", "threads", "max_num_seqs", "top_p", "repeat_penalty")
+
+
 def _spec_from_request(req: DeployRequest | RedeployRequest, base: Spec | None = None) -> Spec:
     data = req.model_dump(exclude_none=True)
+    for field in _AUTO_AT_ZERO:
+        if data.get(field) == 0:
+            data[field] = None
     merged = {**base.to_dict(), **data} if base else data
     spec = Spec.from_dict(merged)
     spec.validate()

@@ -135,6 +135,27 @@ web/server.py (3000, estático + proxy /api) ──► central/app.py (8001) ─
 - Quantização escolhida como `org/nome:Q4_K_S` (o mesmo formato do `-hf` do llama.cpp); sem sufixo, `DEFAULT_QUANTS` decide. O modal lista as quantizações direto da API do Hugging Face e aceita o link do arquivo colado. Arquivos divididos (`-00001-of-0000N`) não são escolhidos. vLLM recusa o sufixo.
 - `llama-bin/`, `llama-models/`, `sursumai.db*` e `sursumai-logs/` são ignorados pelo git.
 
+### Tuning (os ajustes opcionais do deploy)
+
+Campos do `Spec` que, vazios, deixam o runtime decidir — é assim que quase todo
+deploy roda. `name` (só apresentação), `kv_cache`, `parallel`, `top_p`,
+`repeat_penalty`; llama.cpp: `gpu_layers`, `threads`, `flash_attn`; vLLM:
+`quantization`, `trust_remote_code`, `max_num_seqs`, `swap_space`.
+
+- **Validado no `Spec`**, não na máquina: valor errado vira frase no modal, não
+  container que morre em um segundo com uma linha de C++.
+- `kv_cache` usa as palavras do llama.cpp (`q8_0`) e `agent/executor.py`
+  traduz para o que o vLLM chama (`--kv-cache-dtype fp8`). A interface mostra
+  uma lista só; a grafia de cada runtime não vaza para o usuário.
+- `top_p`/`repeat_penalty` são **só llama.cpp**: no vLLM são valores de
+  requisição, não flags do servidor.
+- **0 nos campos numéricos significa "de volta ao automático"** (`_AUTO_AT_ZERO`
+  em `central/app.py`): sem isso um redeploy conseguia aumentar um valor mas
+  nunca limpar, porque `None` quer dizer "mantém o que tinha".
+- Na interface, trocar de runtime **esconde** os campos do outro, nunca apaga o
+  que foi digitado, e só o botão *Reset to automatic* limpa. Campo que se perde
+  num clique que você desfaz é o que faz o usuário brigar com o formulário.
+
 ### Endereçamento OpenAI
 
 Uma URL só (`http://localhost:8001/v1`) e o `model` decide quem responde. `_resolve_target()` resolve nesta ordem, para nunca ficar ambíguo: `router`/`auto` → pool padrão; id exato de deploy; id ou nome de pool; nome do modelo (`Qwen/Qwen3-0.6B-GGUF`). Modelo desconhecido devolve 404 listando o que existe; modelo não pronto devolve 422 com o status. `/v1/models` lista deployments, pools e `router`.

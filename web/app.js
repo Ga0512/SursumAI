@@ -291,6 +291,7 @@ function onDeployModalOpen() {}
 function setRuntime(r) {
   selectedRuntime = r;
   setTimeout(refreshQuants);
+  syncTuning();
   document.querySelectorAll(".runtime-card").forEach((b) => {
     b.classList.toggle("active", b.dataset.runtime === r);
   });
@@ -331,6 +332,7 @@ async function openModal() {
   document.getElementById("f_tokens").value = 2048;
   document.getElementById("f_temp").value = 0;
   document.getElementById("f_port").value = "";
+  fillTuning(null);
   document.getElementById("provider_models").classList.add("hidden");
   document.getElementById("f_model").classList.add("hidden");
   document.getElementById("modal").classList.remove("hidden");
@@ -410,6 +412,7 @@ async function openRedeploy(id) {
   document.getElementById("f_temp").value = s.temperature ?? 0;
   document.getElementById("f_port").value = s.port ?? "";
   document.getElementById("f_hf_token").value = "";
+  fillTuning(s);
   document.getElementById("modal").classList.remove("hidden");
 }
 
@@ -604,7 +607,7 @@ function cardHTML(d) {
   return `
     <div class="deploy-card glass" onclick="openDetail('${d.id}')">
       <div class="row">
-        <span class="model">◆ ${d.spec.model}</span>
+        <span class="model">◆ ${escapeHtml(displayName(d))}</span>
         <span class="status ${status}"><span class="dot"></span>${STATUS_LABEL[status] || status}</span>
       </div>
       <div class="meta">${meta}</div>
@@ -696,6 +699,12 @@ async function loadApiKeys() {
       </div>
       <button class="btn btn-ghost btn-sm" onclick="revokeApiKey('${k.id}', '${escapeHtml(k.name)}')">Revoke</button>
     </div>`).join("");
+}
+
+/* What the user calls this deployment: the name they gave it, or the model id.
+   Two quantizations of one model are otherwise two identical-looking cards. */
+function displayName(d) {
+  return (d.spec && d.spec.name) || (d.spec && d.spec.model) || "";
 }
 
 function escapeHtml(text) {
@@ -790,6 +799,69 @@ async function refreshLogs() {
   }
 }
 
+/* ---- Tuning: the optional overrides ----
+   Fields are shown or hidden per runtime and never cleared on the way: going
+   to vLLM and back finds llama's numbers where they were left. Only "Reset to
+   automatic" empties them, because losing what you typed to a click you undo
+   is how a form becomes something people fight with. */
+
+const TUNING = [
+  ["f_name", "name", "text"],
+  ["f_kv", "kv_cache", "text"],
+  ["f_parallel", "parallel", "int"],
+  ["f_top_p", "top_p", "float"],
+  ["f_repeat", "repeat_penalty", "float"],
+  ["f_ngl", "gpu_layers", "text"],
+  ["f_threads", "threads", "int"],
+  ["f_flash", "flash_attn", "bool"],
+  ["f_quantization", "quantization", "text"],
+  ["f_swap", "swap_space", "int"],
+  ["f_trust", "trust_remote_code", "bool"],
+];
+
+function syncTuning() {
+  const llama = selectedRuntime === "llama";
+  document.querySelectorAll(".llama-only").forEach((el) => el.classList.toggle("hidden", !llama));
+  document.querySelectorAll(".vllm-only").forEach((el) => el.classList.toggle("hidden", llama));
+}
+
+function tuningFields() {
+  const out = {};
+  const llama = selectedRuntime === "llama";
+  for (const [id, field, kind] of TUNING) {
+    const el = document.getElementById(id);
+    if (!el || el.closest(".field")?.classList.contains("hidden")) continue;
+    if (kind === "bool") { out[field] = el.checked; continue; }
+    const raw = el.value.trim();
+    if (kind === "text") { out[field] = raw; continue; }
+    // 0 is how the API is told to go back to automatic
+    out[field] = raw === "" ? 0 : (kind === "int" ? parseInt(raw, 10) : parseFloat(raw));
+  }
+  // a field the runtime does not have must not travel with a stale value
+  for (const [, field] of TUNING) if (!(field in out)) out[field] = llama ? vllmDefault(field) : llamaDefault(field);
+  return out;
+}
+
+const vllmDefault = (f) => ({ quantization: "", trust_remote_code: false, swap_space: 0 }[f]);
+const llamaDefault = (f) => ({ gpu_layers: "", threads: 0, flash_attn: false,
+                               top_p: 0, repeat_penalty: 0 }[f]);
+
+function fillTuning(spec) {
+  for (const [id, field, kind] of TUNING) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const value = spec ? spec[field] : null;
+    if (kind === "bool") el.checked = Boolean(value);
+    else el.value = value === null || value === undefined || value === "" ? "" : value;
+  }
+  syncTuning();
+}
+
+function resetTuning() {
+  fillTuning(null);
+  toast("Tuning back to automatic");
+}
+
 /* ---- create / redeploy ---- */
 async function deploy() {
   if (creating) return;
@@ -803,6 +875,7 @@ async function deploy() {
     max_tokens: parseInt(document.getElementById("f_tokens").value, 10) || 2048,
     temperature: parseFloat(document.getElementById("f_temp").value) || 0,
     hf_token: document.getElementById("f_hf_token").value.trim() || undefined,
+    ...tuningFields(),
     port: parseInt(document.getElementById("f_port").value, 10) || undefined,
     // what the Pro module adds to a deploy (the machine it runs on); nothing here
     ...(editingId ? {} : proDeployFields()),
@@ -903,7 +976,7 @@ async function refreshDetail() {
 }
 
 function renderDetailMetrics(d) {
-  document.getElementById("detailTitle").textContent = d.spec.model;
+  document.getElementById("detailTitle").textContent = displayName(d);
   document.getElementById("detailSub").textContent =
     `${d.spec.runtime}${deployWhere(d) ? " · " + deployWhere(d) : ""} · ${d.spec.gpus} GPU`;
   const st = document.getElementById("detailStatus");
@@ -1335,7 +1408,7 @@ async function loadPoolsView() {
     const models = ids.map((m) => {
       const d = byId[m];
       if (!d) return `${m.slice(0, 8)} <em>(removed)</em>`;
-      return d.status === "healthy" ? d.spec.model : `${d.spec.model} <em>(${d.status})</em>`;
+      return d.status === "healthy" ? displayName(d) : `${displayName(d)} <em>(${d.status})</em>`;
     }).join(", ");
     // The badge used to be green for every pool, including one whose models
     // had all been destroyed — it looked ready and answered every message with
@@ -1381,7 +1454,7 @@ async function loadChat() {
     ? pools.map((p) => `<option value="pool:${p.id}">Pool: ${p.name} (${p.mode || "escalation"})</option>`).join("")
     : "";
   const modelOpts = healthy.length
-    ? healthy.map((d) => `<option value="${d.id}">Model: ${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("")
+    ? healthy.map((d) => `<option value="${d.id}">Model: ${displayName(d)} (${d.id.slice(0, 8)})</option>`).join("")
     : '<option value="">No healthy models yet</option>';
   sel.innerHTML = (poolOpts ? `<optgroup label="Pools">${poolOpts}</optgroup>` : "") +
     `<optgroup label="Models">${modelOpts}</optgroup>`;
@@ -1479,7 +1552,7 @@ async function openPoolModal() {
   const healthy = deploys.filter((d) => d.status === "healthy");
   if (!healthy.length) { toast("Deploy a model first"); return; }
   poolHealthyDeploys = healthy;
-  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
+  const opts = healthy.map((d) => `<option value="${d.id}">${displayName(d)} (${d.id.slice(0, 8)})</option>`).join("");
   document.getElementById("p_judge").innerHTML = '<option value="">—</option>' + opts;
   document.getElementById("p_name").value = "";
   const box = document.getElementById("p_models");
@@ -1499,7 +1572,7 @@ async function editPool(poolId) {
   const healthy = deploys.filter((d) => d.status === "healthy");
   poolHealthyDeploys = healthy;
   if (!healthy.length) { toast("Deploy a model first"); return; }
-  const opts = healthy.map((d) => `<option value="${d.id}">${d.spec.model} (${d.id.slice(0, 8)})</option>`).join("");
+  const opts = healthy.map((d) => `<option value="${d.id}">${displayName(d)} (${d.id.slice(0, 8)})</option>`).join("");
   document.getElementById("p_judge").innerHTML = '<option value="">—</option>' + opts;
   document.getElementById("p_name").value = pool.name || "";
   document.getElementById("p_mode").value = pool.mode || "escalation";
@@ -1514,7 +1587,7 @@ async function editPool(poolId) {
 
 function addPoolModel(selectedId) {
   const opts = poolHealthyDeploys.map((d) =>
-    `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${d.spec.model} (${d.id.slice(0, 8)})</option>`
+    `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${displayName(d)} (${d.id.slice(0, 8)})</option>`
   ).join("");
   const div = document.createElement("div");
   div.className = "pool-model-row";
@@ -1587,7 +1660,7 @@ async function refreshPoolLog(poolId) {
       const r = await fetch(`${API}/deploys`, { headers: authHeaders() });
       if (r.ok) deploys = await r.json();
     } catch {}
-    const nameOf = Object.fromEntries(deploys.map((d) => [d.id, d.spec.model]));
+    const nameOf = Object.fromEntries(deploys.map((d) => [d.id, displayName(d)]));
     const when = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     el.textContent = data.map((e) =>
       `${when(e.created_at)}  ${e.decision.padEnd(10)} → ${nameOf[e.model_served] || e.model_served.slice(0, 12)}  ${e.tokens} tokens`
