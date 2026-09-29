@@ -346,17 +346,43 @@ async function recommendRuntime() {
     const caps = await res.json();
     const rec = caps.recommended_runtime || "llama";
     setRuntime(rec);
+    // vLLM only ever runs as a container. On a machine without Docker — a
+    // RunPod pod is itself a container — picking it used to be allowed and
+    // then failed in the preflight: the app knew and let you do it anyway.
+    lockRuntime(caps.docker === false
+      ? "vLLM needs Docker, and this machine does not have it. llama.cpp uses "
+        + "the same GPU without a container."
+      : "");
     if (rec === "vllm") {
       note.textContent = "NVIDIA GPU detected: using vLLM for best performance.";
     } else if (caps.gpu && !caps.docker) {
-      note.textContent = "NVIDIA GPU found but Docker is not running: using llama-server.";
+      note.textContent = "NVIDIA GPU found, but no Docker on this machine: using llama.cpp, "
+                       + "which runs on the GPU without a container.";
     } else {
       note.textContent = "No NVIDIA GPU detected: using llama-server (works on any machine).";
     }
   } catch {
     setRuntime("llama");
+    lockRuntime("");
     note.textContent = "Could not detect your machine: using llama-server.";
   }
+}
+
+/* Grey out vLLM with the reason, or give it back when `why` is empty. */
+function lockRuntime(why) {
+  const card = document.querySelector('.runtime-card[data-runtime="vllm"]');
+  if (!card) return;
+  card.classList.toggle("disabled", Boolean(why));
+  card.disabled = Boolean(why);
+  card.title = why;
+  let hint = card.querySelector(".rwhy");
+  if (why && !hint) {
+    hint = document.createElement("span");
+    hint.className = "rwhy";
+    card.appendChild(hint);
+  }
+  if (hint) hint.textContent = why;
+  if (why && selectedRuntime === "vllm") setRuntime("llama");
 }
 
 function closeModal() {

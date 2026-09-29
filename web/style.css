@@ -1091,3 +1091,6 @@ select.input, .select { cursor: pointer; }
 .danger-zone p { margin: 0 0 var(--s3); font-size: 0.875rem; color: var(--text-soft); }
 .danger-zone .keys-new { margin: 0; }
 .uninstalled { max-width: 520px; margin: 18vh auto; padding: 0 16px; text-align: center; }
+
+.runtime-card.disabled { opacity: 0.55; cursor: not-allowed; }
+.runtime-card .rwhy { display: block; margin-top: var(--s2); font-size: 0.75rem; color: var(--red, #c1274f); }

@@ -267,3 +267,49 @@ def test_updating_while_it_is_already_serving_asks_for_a_restart(served, monkeyp
     promodule.install()
 
     assert promodule.RESTART_NEEDED is True
+
+
+REAL_FETCH = promodule._fetch
+
+
+def test_the_version_on_disk_is_sent_so_the_server_can_answer_304(served, monkeypatch):
+    """Otherwise every machine with Pro downloads the whole module every day."""
+    _pro_account(monkeypatch)
+    promodule.install()
+    seen = {}
+
+    class _Resp:
+        status = 304
+        headers = {}
+
+        def read(self):
+            return b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _urlopen(req, timeout=None):
+        seen["version"] = req.get_header("X-module-version")
+        return _Resp()
+
+    monkeypatch.setattr(promodule, "_fetch", REAL_FETCH)      # the real one, not the fixture's
+    monkeypatch.setattr(promodule.urllib.request, "urlopen", _urlopen)
+
+    assert promodule.install() == "1.0.0"          # nothing downloaded, nothing broken
+    assert seen["version"] == "1.0.0"
+    assert promodule.installed_version() == "1.0.0"
+
+
+def test_a_304_from_urllib_is_not_treated_as_a_failure(served, monkeypatch):
+    _pro_account(monkeypatch)
+    promodule.install()
+
+    def _raise(req, timeout=None):
+        raise promodule.urllib.error.HTTPError(req.full_url, 304, "Not Modified", None, None)
+
+    monkeypatch.setattr(promodule, "_fetch", REAL_FETCH)
+    monkeypatch.setattr(promodule.urllib.request, "urlopen", _raise)
+    assert promodule.update() == "1.0.0"

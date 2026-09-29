@@ -58,17 +58,32 @@ def is_installed() -> bool:
 
 # ---- getting it ----
 
+class UpToDate(Exception):
+    """The server says we already have this version. Not an error."""
+
+
 def _fetch(token: str, timeout: float = 60) -> tuple[bytes, bytes, str]:
-    """Download the module. Returns (archive, signature, version)."""
-    req = urllib.request.Request(
-        f"{account.API}/module",
-        headers={"Authorization": f"Bearer {token}", "User-Agent": "sursumai"})
+    """Download the module. Returns (archive, signature, version).
+
+    Sends the version on disk: the daily check then costs a 304 with no body
+    instead of the whole module, every day, on every machine that has Pro."""
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": "sursumai"}
+    have = installed_version()
+    if have:
+        headers["X-Module-Version"] = have
+    req = urllib.request.Request(f"{account.API}/module", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 304:
+                raise UpToDate
             signature = bytes.fromhex(resp.headers.get("X-Signature", ""))
             version = resp.headers.get("X-Version", "")
             return resp.read(), signature, version
     except urllib.error.HTTPError as e:
+        # urllib raises on 304 instead of returning it: it is not a redirect it
+        # knows how to follow
+        if e.code == 304:
+            raise UpToDate from None
         if e.code in (401, 403):
             raise ProModuleError("this account does not have Pro") from None
         raise ProModuleError(f"the SursumAI account service answered {e.code} — try again in a moment") from None
@@ -99,7 +114,10 @@ def install(token: str | None = None, timeout: float = 60) -> str:
     if not account.PUBLIC_KEY_HEX:
         raise ProModuleError("this build cannot check signatures — please report this")
 
-    archive, signature, version = _fetch(token, timeout)
+    try:
+        archive, signature, version = _fetch(token, timeout)
+    except UpToDate:
+        return installed_version() or ""
     if not ed25519.verify(archive, signature, bytes.fromhex(account.PUBLIC_KEY_HEX)):
         # not "corrupted": a wrong signature means it is not ours
         raise ProModuleError("the Pro module was not signed by SursumAI — "
