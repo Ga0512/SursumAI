@@ -1892,9 +1892,9 @@ function stopChat() {
 restoreSession();
 
 /* ---- the SursumAI account (Pro) ----
-   Free needs no account. Buying Pro creates one on sursum.ai; the token from
+   Free needs no account. Buying Pro creates one on sursumai.com; the token from
    that account, pasted here, is what turns the Pro features on. The answer is
-   signed and cached, so this machine keeps working when sursum.ai does not. */
+   signed and cached, so this machine keeps working when our service does not. */
 
 
 let accountState = { pro: false, connected: false };

@@ -33,7 +33,7 @@ from pathlib import Path
 
 from core import ed25519
 
-API = os.environ.get("SURSUMAI_API", "https://sursumai.sursumai-beta.workers.dev")
+API = os.environ.get("SURSUMAI_API", "https://app.sursumai.com")
 
 # The public half of the key that signs entitlements and the Pro module. The
 # private half exists only as a Cloudflare secret and in the signing tool.

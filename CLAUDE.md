@@ -59,12 +59,13 @@ Cloudflare. **Nunca** gerar outra: todo install confia nesta.
 
 ### No ar (beta, v1.0.0)
 
-O serviço de conta roda em `https://sursumai.sursumai-beta.workers.dev`
-(Worker `sursumai`, subdomínio `sursumai-beta`, sem domínio próprio). É o
-`API` de `core/account.py`, e o Go Pro do app e do site levam para lá. A Stripe
-ainda está em **modo de teste**: vender de verdade é trocar o
-`STRIPE_SECRET_KEY` para `sk_live_…` e criar produto, preços (mesmos
-lookup_keys) e portal no modo live. A landing (`site/`) vai no Cloudflare Pages.
+Domínio próprio, tudo na Cloudflare: **`sursumai.com`** é a landing (Pages) e
+**`app.sursumai.com`** é o serviço de conta (Worker `sursumai`). O endereço
+antigo `sursumai.sursumai-beta.workers.dev` **continua no ar de propósito**: ele
+está gravado em todo app instalado antes da v1.0.12, e essas máquinas só
+aprendem o novo quando atualizam — nunca desligue sem olhar quantas ainda
+perguntam por lá. A Stripe está em **modo live** (produto, preços e portal
+criados por `tools/stripe_setup.sh`; cupons de um mês, só no checkout mensal).
 
 Fora isso: pool com modelos em máquinas diferentes (nunca testado) e
 screenshots com a aba Machines.

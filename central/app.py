@@ -633,7 +633,7 @@ async def meta_uninstall(req: UninstallRequest, user=Depends(_current_user)):
 
 
 # ---- the SursumAI account (Pro) ----
-# Free needs no account. Buying Pro creates one on sursum.ai; the token from
+# Free needs no account. Buying Pro creates one on sursumai.com; the token from
 # that account, pasted here, is what turns the Pro features on. The account
 # belongs to the person, this endpoint belongs to the machine — anyone logged
 # into this dashboard can connect or disconnect it, because a dashboard that
@@ -670,7 +670,7 @@ async def meta_account_connect(req: AccountRequest, user=Depends(_current_user))
 
 
 async def _account_loop() -> None:
-    """Ask sursum.ai once a day whether this account is still Pro.
+    """Ask the account service once a day whether this account is still Pro.
 
     Quiet by design: a failure changes nothing until the last signed answer
     actually expires, so our being down is invisible here.
