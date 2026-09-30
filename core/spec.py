@@ -44,7 +44,7 @@ class Spec:
     quantization: str = ""             # awq, gptq, fp8, …
     trust_remote_code: bool = False
     max_num_seqs: int | None = None
-    swap_space: int | None = None      # GiB of CPU memory for swapped-out blocks
+    cpu_offload_gb: int | None = None  # GiB of weights kept in CPU memory
 
     def validate(self) -> None:
         if not self.model or not isinstance(self.model, str):
@@ -98,8 +98,8 @@ class Spec:
                 raise SpecError(f"quantization must be one of: {', '.join(VLLM_QUANTIZATIONS)}")
             if self.max_num_seqs is not None and not 1 <= self.max_num_seqs <= 1024:
                 raise SpecError("max_num_seqs must be between 1 and 1024")
-            if self.swap_space is not None and not 0 <= self.swap_space <= 128:
-                raise SpecError("swap space must be between 0 and 128 GiB")
+            if self.cpu_offload_gb is not None and not 0 <= self.cpu_offload_gb <= 512:
+                raise SpecError("CPU offload must be between 0 and 512 GiB")
 
     def to_dict(self) -> dict:
         return {
@@ -126,7 +126,7 @@ class Spec:
             "quantization": self.quantization,
             "trust_remote_code": self.trust_remote_code,
             "max_num_seqs": self.max_num_seqs,
-            "swap_space": self.swap_space,
+            "cpu_offload_gb": self.cpu_offload_gb,
         }
 
     @classmethod

@@ -293,9 +293,10 @@
               <span class="fhint">Only for a repo that was published quantized that way.</span>
             </div>
             <div class="field vllm-only">
-              <label>Swap space (GiB)</label>
-              <input id="f_swap" class="input" type="number" min="0" max="128" placeholder="auto" />
-              <span class="fhint">CPU memory to fall back on when the GPU fills up.</span>
+              <label>CPU offload (GiB)</label>
+              <input id="f_offload" class="input" type="number" min="0" max="512" placeholder="auto" />
+              <span class="fhint">Weights kept in CPU memory, so a model bigger than your
+                VRAM still runs. Slower the more you offload.</span>
             </div>
             <div class="field vllm-only field-check">
               <label><input id="f_trust" type="checkbox" /> Trust remote code</label>

@@ -87,8 +87,11 @@ def _advanced_args(spec: Spec) -> list[str]:
         args += ["--trust-remote-code"]
     if spec.max_num_seqs or spec.parallel:
         args += ["--max-num-seqs", str(spec.max_num_seqs or spec.parallel)]
-    if spec.swap_space is not None:
-        args += ["--swap-space", str(spec.swap_space)]
+    if spec.cpu_offload_gb:
+        # vLLM 0.21 dropped --swap-space with the V1 engine; this is the knob
+        # that still trades GPU memory for CPU memory, and it is what lets a
+        # model that does not fit in VRAM run at all
+        args += ["--cpu-offload-gb", str(spec.cpu_offload_gb)]
     # top_p and repeat_penalty are not server flags in vLLM: they are sampling
     # values sent per request, so the modal offers them on llama.cpp only
     return args

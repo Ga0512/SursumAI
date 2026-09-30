@@ -588,3 +588,15 @@ def test_flash_attention_is_only_asked_for_when_it_was_asked_for():
 def test_a_value_that_would_break_the_server_is_refused_here(kw, message):
     with pytest.raises(Exception, match=message):
         _llama_cmd(**kw)
+
+
+def test_no_flag_we_send_is_unknown_to_the_pinned_llama_server():
+    """Same guard as the vLLM one: the list is `--help` of the pinned image."""
+    from pathlib import Path
+    known = {line.strip() for line
+             in (Path(__file__).parent / "flags_llama.txt").read_text().splitlines()
+             if line.strip()}
+    cmd = _llama_cmd(kv_cache="q8_0", parallel=4, top_p=0.9, repeat_penalty=1.1,
+                     threads=8, flash_attn=True, gpu_layers="auto")
+    sent = {a for a in cmd if a.startswith("--")}
+    assert sent <= known, sent - known

@@ -3,6 +3,8 @@
 vLLM runs as a container, so what matters is the argument list: a wrong flag
 shows up as a container that exits in a second with a line of C++.
 """
+from pathlib import Path
+
 import pytest
 
 from agent import executor
@@ -18,7 +20,7 @@ def cmd(**kw) -> list[str]:
 def test_a_deploy_with_no_overrides_looks_exactly_as_before():
     line = " ".join(cmd())
     for flag in ("--kv-cache-dtype", "--quantization", "--trust-remote-code",
-                 "--max-num-seqs", "--swap-space"):
+                 "--max-num-seqs", "--cpu-offload-gb"):
         assert flag not in line
 
 
@@ -47,16 +49,18 @@ def test_parallel_conversations_map_to_max_num_seqs():
     assert line[line.index("--max-num-seqs") + 1] == "32"
 
 
-def test_swap_space_of_zero_is_a_real_choice_not_an_unset_field():
-    """0 turns swapping off; None leaves vLLM's own default."""
-    assert cmd(swap_space=0)[cmd(swap_space=0).index("--swap-space") + 1] == "0"
-    assert "--swap-space" not in cmd()
+def test_cpu_offload_is_only_asked_for_when_a_number_was_given():
+    """0 means "do not offload", which is vLLM's own default: sending
+    `--cpu-offload-gb 0` would say the same thing in a flag that can go stale."""
+    line = cmd(cpu_offload_gb=8)
+    assert line[line.index("--cpu-offload-gb") + 1] == "8"
+    assert "--cpu-offload-gb" not in cmd() and "--cpu-offload-gb" not in cmd(cpu_offload_gb=0)
 
 
 @pytest.mark.parametrize("kw,message", [
     ({"quantization": "awq2"}, "quantization"),
     ({"max_num_seqs": 0}, "max_num_seqs"),
-    ({"swap_space": 999}, "swap space"),
+    ({"cpu_offload_gb": 999}, "CPU offload"),
     ({"kv_cache": "nope"}, "KV cache"),
 ])
 def test_a_value_the_server_would_choke_on_is_refused_here(kw, message):
@@ -68,3 +72,24 @@ def test_the_secrets_still_travel_by_environment_not_argv():
     line = " ".join(cmd(api_key="sk-internal-abc", hf_token="hf_secret",
                         quantization="awq", trust_remote_code=True))
     assert "sk-internal-abc" not in line and "hf_secret" not in line
+
+
+# ---- every flag we can emit exists in the image we pin ----
+
+def _known(name: str) -> set[str]:
+    path = Path(__file__).parent / f"flags_{name}.txt"
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
+def test_no_flag_we_send_is_unknown_to_the_pinned_vllm():
+    """`--swap-space` was real in vLLM 0.9 and gone in 0.21, and the deploy
+    died with "unrecognized arguments" on a real GPU. The lists next to this
+    file are `serve --help=all` of the pinned image and of the pinned llama.cpp
+    image; regenerate them when either pin moves."""
+    line = executor.build_cmd(
+        Spec(model="org/m", runtime="vllm", api_key="k", kv_cache="q8_0", parallel=4,
+             quantization="awq", trust_remote_code=True, max_num_seqs=32, cpu_offload_gb=8),
+        "d" * 32)
+    image = line.index("vllm/vllm-openai:v0.21.0")
+    server_flags = {a for a in line[image:] if a.startswith("--")}
+    assert server_flags <= _known("vllm"), server_flags - _known("vllm")

@@ -815,7 +815,7 @@ const TUNING = [
   ["f_threads", "threads", "int"],
   ["f_flash", "flash_attn", "bool"],
   ["f_quantization", "quantization", "text"],
-  ["f_swap", "swap_space", "int"],
+  ["f_offload", "cpu_offload_gb", "int"],
   ["f_trust", "trust_remote_code", "bool"],
 ];
 
@@ -842,7 +842,7 @@ function tuningFields() {
   return out;
 }
 
-const vllmDefault = (f) => ({ quantization: "", trust_remote_code: false, swap_space: 0 }[f]);
+const vllmDefault = (f) => ({ quantization: "", trust_remote_code: false, cpu_offload_gb: 0 }[f]);
 const llamaDefault = (f) => ({ gpu_layers: "", threads: 0, flash_attn: false,
                                top_p: 0, repeat_penalty: 0 }[f]);
 

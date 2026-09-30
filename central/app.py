@@ -156,7 +156,7 @@ class DeployRequest(BaseModel):
     quantization: str = ""
     trust_remote_code: bool = False
     max_num_seqs: int | None = None
-    swap_space: int | None = None
+    cpu_offload_gb: int | None = None
     # None runs on this machine; anything else needs SursumAI Pro
     machine_id: str | None = None
 
@@ -183,7 +183,7 @@ class RedeployRequest(BaseModel):
     quantization: str | None = None
     trust_remote_code: bool | None = None
     max_num_seqs: int | None = None
-    swap_space: int | None = None
+    cpu_offload_gb: int | None = None
 
 
 class ChatRequest(BaseModel):
@@ -254,7 +254,8 @@ def _api_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
 
 # Advanced numbers where 0 means "back to automatic". Without this a redeploy
 # could raise a value but never clear it: None means "keep what it had".
-_AUTO_AT_ZERO = ("parallel", "threads", "max_num_seqs", "top_p", "repeat_penalty")
+_AUTO_AT_ZERO = ("parallel", "threads", "max_num_seqs", "top_p", "repeat_penalty",
+                 "cpu_offload_gb")
 
 
 def _spec_from_request(req: DeployRequest | RedeployRequest, base: Spec | None = None) -> Spec:

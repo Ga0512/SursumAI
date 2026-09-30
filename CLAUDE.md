@@ -140,7 +140,7 @@ web/server.py (3000, estático + proxy /api) ──► central/app.py (8001) ─
 Campos do `Spec` que, vazios, deixam o runtime decidir — é assim que quase todo
 deploy roda. `name` (só apresentação), `kv_cache`, `parallel`, `top_p`,
 `repeat_penalty`; llama.cpp: `gpu_layers`, `threads`, `flash_attn`; vLLM:
-`quantization`, `trust_remote_code`, `max_num_seqs`, `swap_space`.
+`quantization`, `trust_remote_code`, `max_num_seqs`, `cpu_offload_gb`.
 
 - **Validado no `Spec`**, não na máquina: valor errado vira frase no modal, não
   container que morre em um segundo com uma linha de C++.
@@ -155,6 +155,13 @@ deploy roda. `name` (só apresentação), `kv_cache`, `parallel`, `top_p`,
 - Na interface, trocar de runtime **esconde** os campos do outro, nunca apaga o
   que foi digitado, e só o botão *Reset to automatic* limpa. Campo que se perde
   num clique que você desfaz é o que faz o usuário brigar com o formulário.
+- **`tests/flags_vllm.txt` e `tests/flags_llama.txt`** são o `--help` das imagens
+  pinadas, e um teste garante que nenhuma flag nossa está fora dessas listas.
+  Nasceu de um deploy morto numa GPU real: `--swap-space` existia na 0.9 e sumiu
+  na 0.21 do vLLM, e o container respondia "unrecognized arguments". Ao mover um
+  pin de imagem, regenere as listas. O equivalente do swap hoje é
+  `--cpu-offload-gb`. No llama.cpp o flash attention já é `auto`, então KV cache
+  quantizado não exige ligar nada.
 
 ### Endereçamento OpenAI
 
