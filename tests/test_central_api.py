@@ -582,3 +582,35 @@ def test_uninstalling_from_the_page_asks_for_the_password(client, monkeypatch):
 def test_uninstall_and_update_need_a_session(client):
     assert client.post("/meta/uninstall", json={"password": "x"}).status_code == 401
     assert client.post("/meta/update").status_code == 401
+
+
+# ---- a dead runtime explains itself in one sentence ----
+
+@pytest.mark.parametrize("log_line,expected", [
+    ("Value error, Cannot find the config file for awq", "not published quantized"),
+    ("vllm: error: unrecognized arguments: --swap-space 0", "does not accept one of the tuning"),
+    ("torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2 GiB", "did not fit in the GPU"),
+    ("OSError: You are trying to access a gated repo", "gated on Hugging Face"),
+    ("ValueError: Loading this model requires you to set trust_remote_code=True", "Trust remote code"),
+    ("Segmentation fault (core dumped)", "open Logs"),
+])
+def test_a_runtime_that_dies_is_explained_not_quoted(client, monkeypatch, log_line, expected):
+    """The log is a traceback or a line of C++; the card gets a sentence and
+    the next thing to try."""
+    from central import agent_client, app as central_app
+
+    monkeypatch.setattr(agent_client, "logs",
+                        lambda deploy_id, tail=300, agent=None: f"blah\n{log_line}\nblah")
+    deploy = type("D", (), {"machine_id": None})()
+    assert expected in central_app._why_it_died("d1", deploy)
+
+
+def test_an_unreachable_agent_does_not_hide_the_failure(client, monkeypatch):
+    from central import agent_client, app as central_app
+
+    def _boom(deploy_id, tail=300, agent=None):
+        raise agent_client.AgentError("agent unreachable")
+
+    monkeypatch.setattr(agent_client, "logs", _boom)
+    reason = central_app._why_it_died("d1", type("D", (), {"machine_id": None})())
+    assert "open Logs" in reason

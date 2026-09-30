@@ -885,6 +885,7 @@ async function deploy() {
   creating = true;
   document.getElementById("progress").classList.remove("hidden");
   document.getElementById("progressText").textContent = "Starting deployment…";
+  setOrb("checking");
   document.getElementById("deployBtn").disabled = true;
   try {
     const url = editingId ? `${API}/deploys/${editingId}/redeploy` : `${API}/deploys`;
@@ -899,12 +900,29 @@ async function deploy() {
   }
 }
 
+/* What the wait is, in words and as an orb state. The download is the long
+   one — minutes on a big model — and the difference between "still coming
+   down" and "warming up" is the whole reason this is not one spinner. */
 function deployStageLabel(d) {
   const s = d.status;
   if (s === "checking") return "Checking your machine…";
   if (s === "provisioning") return `Provisioning${d.stage ? " — " + d.stage : "…"}`;
   if (s === "redeploying") return "Redeploying…";
   return null;
+}
+
+function deployOrbState(d) {
+  if (d.status === "checking") return "checking";
+  const stage = (d.stage || "").toLowerCase();
+  // "already downloaded" also contains the word, and it is the opposite state
+  if (stage.includes("already")) return "starting";
+  if (stage.includes("download")) return "downloading";
+  return "starting";
+}
+
+function setOrb(state) {
+  const orb = document.getElementById("progressOrb");
+  if (orb) orb.dataset.state = state;
 }
 
 async function pollUntilHealthy(id) {
@@ -916,7 +934,10 @@ async function pollUntilHealthy(id) {
       if (res.ok) d = await res.json();
     } catch { /* retry */ }
     const label = d && deployStageLabel(d);
-    if (label) document.getElementById("progressText").textContent = label;
+    if (label) {
+      document.getElementById("progressText").textContent = label;
+      setOrb(deployOrbState(d));
+    }
     if (d && (d.status === "healthy" || d.status === "failed")) {
       document.getElementById("progress").classList.add("hidden");
       document.getElementById("deployBtn").disabled = false;
@@ -1146,7 +1167,10 @@ async function sendPlay() {
     const box = document.getElementById("playMessages");
     const div = document.createElement("div");
     div.className = "msg assistant";
-    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details><div class="content"></div>';
+    // a model that reasons takes a minute before its first word; without this
+    // the page looked frozen and people pressed send again
+    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details>'
+                  + `<div class="content"><span class="orb" data-state="${isPool ? "judging" : "thinking"}"></span></div>`;
     box.appendChild(div);
     const thinkEl = div.querySelector(".think");
     // reasoning is collapsed by default: on a thinking model it is longer than
@@ -1752,7 +1776,10 @@ async function sendChat() {
     const box = document.getElementById("chatMessages");
     const div = document.createElement("div");
     div.className = "msg assistant";
-    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details><div class="content"></div>';
+    // a model that reasons takes a minute before its first word; without this
+    // the page looked frozen and people pressed send again
+    div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details>'
+                  + `<div class="content"><span class="orb" data-state="${isPool ? "judging" : "thinking"}"></span></div>`;
     box.appendChild(div);
     const thinkEl = div.querySelector(".think");
     // reasoning is collapsed by default: on a thinking model it is longer than

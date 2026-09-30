@@ -269,6 +269,55 @@ def _spec_from_request(req: DeployRequest | RedeployRequest, base: Spec | None =
     return spec
 
 
+# What a runtime says when it gives up, and what that means for the person who
+# clicked Deploy. The log is a Python traceback or a line of C++; the card gets
+# a sentence and the next thing to try. Nothing here guesses: each pattern was
+# seen in a real failure.
+_DEATHS = (
+    ("cannot find the config file for",
+     "this model was not published quantized that way — set Quantization back to "
+     "None, or pick a repository that is already quantized"),
+    ("unrecognized arguments",
+     "this version of the runtime does not accept one of the tuning options — "
+     "try again with Tuning reset to automatic"),
+    ("torch.outofmemoryerror",
+     "the model did not fit in the GPU — lower Max model len, or use llama.cpp "
+     "with a GGUF, which splits the model between GPU and CPU"),
+    ("cuda out of memory",
+     "the model did not fit in the GPU — lower Max model len, or use llama.cpp "
+     "with a GGUF, which splits the model between GPU and CPU"),
+    ("gated repo",
+     "this model is gated on Hugging Face — accept its terms there and paste a "
+     "Hugging Face token in Advanced options"),
+    ("401 client error",
+     "Hugging Face refused the download — this model needs a Hugging Face token "
+     "in Advanced options"),
+    ("does not appear to have a file named config.json",
+     "this repository has no model in it — check the model id"),
+    ("trust_remote_code",
+     "this model ships its own code and only loads with Trust remote code turned "
+     "on, in Advanced options"),
+    ("no supported device detected",
+     "the runtime could not see your GPU — check that the NVIDIA driver and the "
+     "container toolkit are installed"),
+)
+
+
+def _why_it_died(deploy_id: str, deploy) -> str:
+    """The reason, from the deploy's own log, in one sentence."""
+    fallback = "the model did not start in time — open Logs to see what it said"
+    try:
+        agent = _agent(deploy.machine_id)
+        tail = agent_client.logs(deploy_id, tail=200, agent=agent).lower()
+    except agent_client.AgentError as e:
+        log.debug("could not read the log of %s to explain the failure: %s", deploy_id, e)
+        return fallback
+    for needle, sentence in _DEATHS:
+        if needle in tail:
+            return sentence
+    return fallback
+
+
 def _no_endpoint(deploy) -> str:
     """A healthy deploy with no address: here, it is still coming up; on
     another machine, its connection is not open yet."""
@@ -368,7 +417,7 @@ async def _deploy_job(deploy_id: str) -> None:
                     deploy.status = DeployState.FAILED
                     deploy.error = f"the model started but cannot be reached: {e}"
         else:
-            deploy.error = "Model did not become healthy in time"
+            deploy.error = await asyncio.to_thread(_why_it_died, deploy_id, deploy)
     except agent_client.AgentError as e:
         deploy = store.get(deploy_id)
         if deploy is None:

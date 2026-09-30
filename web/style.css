@@ -709,6 +709,63 @@ select.input, .select { cursor: pointer; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---- the orb: a waiting state that says WHICH wait it is ----------------
+   A spinner says "something is happening". These say what: the machine is
+   being looked at, the weights are coming down, the server is warming up, the
+   model is thinking. The waits here are minutes long — a download, a model
+   that reasons — and a person watching one wants to know they are waiting for
+   the right thing. Pure CSS: the dashboard has no build step and has to work
+   with no internet. */
+.orb {
+  position: relative;
+  width: 18px; height: 18px;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--accent), transparent 70%),
+              var(--surface-sunken);
+}
+.orb::before, .orb::after { content: ""; position: absolute; inset: 0; border-radius: 50%; }
+
+/* checking: one point circling the edge, like something being looked over */
+.orb[data-state="checking"]::before {
+  border: 1.5px solid transparent;
+  border-top-color: var(--accent);
+  animation: orb-spin 1.1s linear infinite;
+}
+/* downloading: rings arriving from outside, the long wait */
+.orb[data-state="downloading"]::before,
+.orb[data-state="downloading"]::after {
+  border: 1.5px solid var(--accent);
+  animation: orb-in 1.8s ease-out infinite;
+}
+.orb[data-state="downloading"]::after { animation-delay: 0.9s; }
+/* starting: the orb itself breathing, warming up */
+.orb[data-state="starting"] { animation: orb-breathe 1.4s ease-in-out infinite; }
+/* thinking: a slow, uneven pulse — a model reasoning is not a metronome */
+.orb[data-state="thinking"]::before {
+  background: radial-gradient(circle at 50% 50%, var(--accent) 0%, transparent 60%);
+  animation: orb-think 2.2s cubic-bezier(.45, 0, .15, 1) infinite;
+}
+/* judging: two points weighing each other, which is what the router does */
+.orb[data-state="judging"]::before,
+.orb[data-state="judging"]::after {
+  border: 1.5px solid transparent;
+  border-top-color: var(--accent);
+  animation: orb-spin 1.5s ease-in-out infinite;
+}
+.orb[data-state="judging"]::after { animation-direction: reverse; opacity: 0.5; }
+
+@keyframes orb-spin { to { transform: rotate(360deg); } }
+@keyframes orb-in { from { transform: scale(1.9); opacity: 0; } 60% { opacity: 0.55; } to { transform: scale(1); opacity: 0; } }
+@keyframes orb-breathe { 0%, 100% { transform: scale(0.88); } 50% { transform: scale(1.06); } }
+@keyframes orb-think { 0%, 100% { transform: scale(0.5); opacity: 0.35; } 45% { transform: scale(1); opacity: 1; } }
+
+/* someone who asked for less motion gets a still orb, never a stuck screen */
+@media (prefers-reduced-motion: reduce) {
+  .orb, .orb::before, .orb::after { animation: none !important; }
+  .orb::before { border-top-color: var(--accent); opacity: 0.6; }
+}
+
 /* ==========================================================================
    Pools + chat
    ========================================================================== */
