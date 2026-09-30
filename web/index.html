@@ -282,15 +282,11 @@
             </div>
             <div class="field vllm-only">
               <label>Quantization</label>
-              <select id="f_quantization" class="input">
-                <option value="">None (full weights)</option>
-                <option value="awq">AWQ</option>
-                <option value="gptq">GPTQ</option>
-                <option value="fp8">FP8</option>
-                <option value="bitsandbytes">bitsandbytes</option>
-                <option value="gguf">GGUF</option>
+              <select id="f_quantization" class="input" disabled>
+                <option value="">Reading the model…</option>
               </select>
-              <span class="fhint">Only for a repo that was published quantized that way.</span>
+              <span class="fhint" id="f_quantization_hint">A model is quantized by whoever
+                published it — this is what the repository says it is.</span>
             </div>
             <div class="field vllm-only">
               <label>CPU offload (GiB)</label>

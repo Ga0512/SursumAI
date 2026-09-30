@@ -486,6 +486,7 @@ async function refreshQuants() {
   const row = document.getElementById("quant_row");
   const select = document.getElementById("f_quant");
   const [repo, wanted] = input.value.trim().split(":");
+  if (selectedRuntime === "vllm") { row.classList.add("hidden"); quantRepo = null; showVllmQuant(repo); return; }
   if (selectedRuntime !== "llama" || !/^[\w.-]+\/[\w.-]+$/.test(repo || "")) {
     row.classList.add("hidden"); quantRepo = null; return;
   }
@@ -512,6 +513,42 @@ async function refreshQuants() {
     quants.map((x) => `<option value="${escapeHtml(x.q)}">${escapeHtml(x.q)}${gb(x.size)}</option>`).join("");
   select.value = wanted && quants.some((x) => x.q === wanted) ? wanted : "";
   row.classList.remove("hidden");
+}
+
+/* On vLLM there is nothing to choose: a model is quantized by whoever published
+   it, and vLLM reads that from the repository. Offering AWQ for a repo that has
+   full weights only produced a container that died with "Cannot find the config
+   file for awq" — so this field now reports instead of asking. */
+async function showVllmQuant(repo) {
+  const select = document.getElementById("f_quantization");
+  const hint = document.getElementById("f_quantization_hint");
+  const publishedAs = (q) => {
+    select.innerHTML = `<option value="">${escapeHtml(q.toUpperCase())}</option>`;
+    hint.textContent = `This repository is published quantized in ${q.toUpperCase()}, `
+                     + "and vLLM loads it that way on its own.";
+  };
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo || "")) {
+    select.innerHTML = '<option value="">—</option>';
+    hint.textContent = "Pick a model first.";
+    return;
+  }
+  select.innerHTML = '<option value="">Reading the model…</option>';
+  try {
+    const res = await fetch(`https://huggingface.co/api/models/${repo}`);
+    if (!res.ok) throw new Error("not found");
+    const info = await res.json();
+    const q = ((info.config || {}).quantization_config || {}).quant_method;
+    if (q) publishedAs(q);
+    else {
+      select.innerHTML = '<option value="">Full weights</option>';
+      hint.textContent = "This model is not quantized. To run a quantized one, "
+                       + "pick a repository that was published that way (its name usually ends in AWQ or GPTQ).";
+    }
+  } catch {
+    // offline, or a private repo: say so instead of guessing
+    select.innerHTML = '<option value="">Whatever the model says</option>';
+    hint.textContent = "Could not read the repository; vLLM will use what it finds in the model.";
+  }
 }
 
 /* A Hugging Face link pasted as is: the repo, and the quantization of the

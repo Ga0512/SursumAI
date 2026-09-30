@@ -155,6 +155,12 @@ deploy roda. `name` (só apresentação), `kv_cache`, `parallel`, `top_p`,
 - Na interface, trocar de runtime **esconde** os campos do outro, nunca apaga o
   que foi digitado, e só o botão *Reset to automatic* limpa. Campo que se perde
   num clique que você desfaz é o que faz o usuário brigar com o formulário.
+- **Quantização no vLLM não é escolha, é leitura.** Quem quantiza é quem publicou
+  o modelo, e o vLLM lê isso do repositório. O modal mostra o que a API do
+  Hugging Face diz (`config.quantization_config.quant_method`) e não manda
+  `--quantization`; oferecer AWQ para um repo de pesos completos só produzia
+  container morto com "Cannot find the config file for awq". O campo do `Spec`
+  continua existindo para quem usa a API direto.
 - **`tests/flags_vllm.txt` e `tests/flags_llama.txt`** são o `--help` das imagens
   pinadas, e um teste garante que nenhuma flag nossa está fora dessas listas.
   Nasceu de um deploy morto numa GPU real: `--swap-space` existia na 0.9 e sumiu
