@@ -373,7 +373,21 @@ async def deploy_status(deploy_id: str, x_agent_key: str | None = Header(None)):
         "auth_enforced": _auth_enforced(ep, key) if healthy else True,
         "endpoint": ep if running else None,
         "stage": executor_llama.stage(deploy_id) if running else executor.stage(deploy_id),
+        # how far the log has got: the central uses the fact that it MOVES to
+        # know a slow start is still a start. A 4 GiB download on a home
+        # connection took 27 minutes and the deploy was failed as "not healthy
+        # in time" while it was writing progress every second.
+        "log_bytes": _log_size(deploy_id),
     }
+
+
+def _log_size(deploy_id: str) -> int:
+    for module in (executor_llama, executor):
+        try:
+            return module._log_file(deploy_id).stat().st_size
+        except OSError:
+            continue
+    return 0
 
 
 @app.get("/deploys/{deploy_id}/logs")

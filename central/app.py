@@ -294,7 +294,13 @@ _DEATHS = (
      "in Advanced options"),
     ("does not appear to have a file named config.json",
      "this repository has no model in it — check the model id"),
-    ("trust_remote_code",
+    # the words alone appear in vLLM's config dump even when it is ON, and this
+    # message was shown for a deploy that had it enabled: match what the error
+    # itself says, not the setting's name
+    ("requires you to execute the configuration file",
+     "this model ships its own code and only loads with Trust remote code turned "
+     "on, in Advanced options"),
+    ("set `trust_remote_code=true`",
      "this model ships its own code and only loads with Trust remote code turned "
      "on, in Advanced options"),
     ("no supported device detected",
@@ -335,17 +341,33 @@ def _get_owned_deploy(deploy_id: str, user_id: str):
     return deploy
 
 
+# A deploy is given up on when it STOPS MOVING, not when a clock runs out. A
+# 4 GiB download on a home connection took 27 minutes here and was failed at 30
+# as "not healthy in time", with the log writing progress the whole way. The
+# absolute cap is only there so a wedged deploy is not provisioning forever.
+STALL_TIMEOUT = int(os.environ.get("SURSUMAI_STALL_TIMEOUT", 900))     # 15 min silent
+MAX_PROVISION = int(os.environ.get("SURSUMAI_MAX_PROVISION", 4 * 3600))
+
+
 async def _wait_healthy(deploy_id: str, machine_id: str | None = None,
-                        timeout: int = 1800) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+                        timeout: int = MAX_PROVISION) -> bool:
+    started = time.time()
+    last_move = started
+    progress = None
+    while time.time() - started < timeout:
         try:
             agent = await asyncio.to_thread(_agent, machine_id)
             st = await asyncio.to_thread(agent_client.status, deploy_id, agent)
             if st.get("healthy"):
                 return True
+            now_progress = (st.get("stage"), st.get("log_bytes"))
+            if now_progress != progress:
+                progress, last_move = now_progress, time.time()
         except agent_client.AgentError:
             pass
+        if time.time() - last_move > STALL_TIMEOUT:
+            log.info("deploy %s stopped moving for %ss — giving up", deploy_id, STALL_TIMEOUT)
+            return False
         await asyncio.sleep(5)
     return False
 

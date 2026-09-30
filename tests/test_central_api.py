@@ -591,7 +591,7 @@ def test_uninstall_and_update_need_a_session(client):
     ("vllm: error: unrecognized arguments: --swap-space 0", "does not accept one of the tuning"),
     ("torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2 GiB", "did not fit in the GPU"),
     ("OSError: You are trying to access a gated repo", "gated on Hugging Face"),
-    ("ValueError: Loading this model requires you to set trust_remote_code=True", "Trust remote code"),
+    ("ValueError: Loading Qwen requires you to execute the configuration file", "Trust remote code"),
     ("Segmentation fault (core dumped)", "open Logs"),
 ])
 def test_a_runtime_that_dies_is_explained_not_quoted(client, monkeypatch, log_line, expected):
@@ -614,3 +614,54 @@ def test_an_unreachable_agent_does_not_hide_the_failure(client, monkeypatch):
     monkeypatch.setattr(agent_client, "logs", _boom)
     reason = central_app._why_it_died("d1", type("D", (), {"machine_id": None})())
     assert "open Logs" in reason
+
+
+def test_the_words_trust_remote_code_in_a_config_dump_are_not_a_failure(client, monkeypatch):
+    """vLLM prints its whole config, `trust_remote_code=True` included, on a
+    deploy that HAS it on. Matching the setting's name told someone to turn on
+    what they had already turned on."""
+    from central import agent_client, app as central_app
+
+    dump = "non-default args: {'model': 'x', 'trust_remote_code': True, 'max_model_len': 16384}"
+    monkeypatch.setattr(agent_client, "logs", lambda deploy_id, tail=300, agent=None: dump)
+    reason = central_app._why_it_died("d1", type("D", (), {"machine_id": None})())
+    assert "Trust remote code" not in reason
+
+
+def test_a_slow_start_is_not_a_failed_start(client, monkeypatch):
+    """The download of a 4 GiB model took 27 minutes on a home connection and
+    the old 30-minute clock failed it while it was still writing progress."""
+    import asyncio
+
+    from central import agent_client, app as central_app
+
+    monkeypatch.setattr(central_app, "STALL_TIMEOUT", 0.3)
+    monkeypatch.setattr(central_app, "MAX_PROVISION", 5)
+    async def _no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(central_app.asyncio, "sleep", _no_wait)
+
+    moving = iter([
+        *({"healthy": False, "stage": "downloading model", "log_bytes": n} for n in range(1, 40)),
+        {"healthy": True},
+    ])
+    monkeypatch.setattr(agent_client, "status", lambda deploy_id, agent=None: next(moving))
+    assert asyncio.run(central_app._wait_healthy("d1")) is True
+
+
+def test_a_deploy_that_stops_moving_is_given_up_on(client, monkeypatch):
+    import asyncio
+
+    from central import agent_client, app as central_app
+
+    monkeypatch.setattr(central_app, "STALL_TIMEOUT", 0.3)
+    monkeypatch.setattr(central_app, "MAX_PROVISION", 5)
+    async def _no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(central_app.asyncio, "sleep", _no_wait)
+    monkeypatch.setattr(agent_client, "status",
+                        lambda deploy_id, agent=None: {"healthy": False, "stage": "stuck",
+                                                       "log_bytes": 10})
+    assert asyncio.run(central_app._wait_healthy("d1")) is False
