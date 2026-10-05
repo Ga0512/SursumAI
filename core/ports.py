@@ -24,6 +24,36 @@ PORT_MAX = 9099
 PORT_RANGE = range(PORT_MIN, PORT_MAX + 1)
 
 
+# --- the three services -------------------------------------------------------
+# Defaults for someone double-clicking the icon; environment for someone running
+# SursumAI as a service, where the port is the host's decision, not ours. One
+# place reads them, so the CLI, start.sh, the web proxy and the URL the user
+# copies can never disagree.
+
+def _service_port(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        port = int(raw)
+    except ValueError:
+        raise SystemExit(f"{name}={raw!r} is not a port number") from None
+    if not 1 <= port <= 65535:
+        raise SystemExit(f"{name}={port} is outside 1-65535")
+    if PORT_MIN <= port <= PORT_MAX:
+        raise SystemExit(f"{name}={port} is inside {PORT_MIN}-{PORT_MAX}, "
+                         "which is where deployed models listen")
+    return port
+
+
+WEB_PORT = _service_port("SURSUMAI_WEB_PORT", 3000)
+CENTRAL_PORT = _service_port("SURSUMAI_CENTRAL_PORT", 8001)
+AGENT_PORT = _service_port("SURSUMAI_AGENT_PORT", 8010)
+
+if len({WEB_PORT, CENTRAL_PORT, AGENT_PORT}) != 3:
+    raise SystemExit("the web, central and agent ports must be three different ports")
+
+
 class NoPortAvailable(Exception):
     """All 100 deploy ports are taken."""
 

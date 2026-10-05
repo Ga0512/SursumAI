@@ -4,8 +4,20 @@ const API = "/api";
    the browser, which goes through the web server's proxy, but a snippet with
    base_url="/api/v1" fails the moment someone pastes it into Python. Clients
    talk to the central directly, on the same host the UI was opened on. */
+/* The URL people copy into their own code: absolute, and on the central's port.
+   The port is 8001 unless whoever runs this chose another one, which is why it
+   is asked for instead of written here. */
+let centralPort = 8001;
+
 function publicBaseUrl() {
-  return `${location.protocol}//${location.hostname}:8001/v1`;
+  return `${location.protocol}//${location.hostname}:${centralPort}/v1`;
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch(`${API}/meta/config`);
+    if (res.ok) centralPort = (await res.json()).central_port || centralPort;
+  } catch { /* the default is right for everyone who did not change it */ }
 }
 
 let selectedTarget = "local";
@@ -120,6 +132,7 @@ async function applyUpdate() {
 }
 
 function restoreSession() {
+  loadConfig();          // which port the copied URL should name
   // Whoever opens localhost already installed SursumAI, so there is nothing
   // to sell them: no token means the login form, and a stored session shows
   // the dashboard at once instead of flashing the form while /auth/me answers.

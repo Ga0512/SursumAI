@@ -227,6 +227,16 @@ Quatro segredos, quatro donos:
 - **`auth_enforced`** no status do agent: depois de saudável, o agent faz uma sonda *sem* a chave e confirma que leva 401/403. Se um runtime ignorasse a chave, ele subiria aberto e a sonda autenticada passaria igual — controle de segurança que falha em silêncio é pior que nenhum. O central loga `error` se isso acontecer.
 - **Token de sessão** protege a API do central, como acima.
 
+### Portas dos três serviços
+
+3000 / 8001 / 8010 por padrão, e **escolha de quem hospeda** por
+`SURSUMAI_WEB_PORT`, `SURSUMAI_CENTRAL_PORT` e `SURSUMAI_AGENT_PORT`. Lidas e
+validadas num lugar só (`core/ports.py`): fora de 1-65535, dentro de 9000-9099
+(onde os modelos escutam) ou duas iguais param o processo com uma frase. O CLI,
+o `start.sh` e o `web/server.py` leem de lá. A página não pode adivinhar a porta
+do central — ela fala pelo proxy —, então pergunta em `GET /meta/config` e usa
+isso no `publicBaseUrl()`; o padrão 8001 continua certo para quem não mexeu.
+
 ### Bind
 
 Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. Exposição na rede é opt-in por `SURSUMAI_BIND` (respeitado por `start.sh`, `web/server.py`, o CLI e `ports.bind_host()`, que os executores usam no `--host` do llama e no `-p` do docker). Nunca voltar `0.0.0.0` como default: a porta do modelo publicada em `0.0.0.0` deixava o modelo na internet de qualquer VM com IP público, com a chave do deploy como única barreira — e em alguns hosts o bind em `0.0.0.0` é recusado e o servidor nem sobe.

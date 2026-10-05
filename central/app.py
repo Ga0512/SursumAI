@@ -591,6 +591,16 @@ def _latest_version() -> str:
         return "?"
 
 
+@app.get("/meta/config")
+async def meta_config():
+    """What the page needs to build the URL people copy.
+
+    The dashboard is served by the web process and talks through its proxy, so
+    it cannot know which port the central is on — and that port is the host's
+    decision when SursumAI runs as a service."""
+    return {"central_port": ports.CENTRAL_PORT}
+
+
 @app.get("/meta/update")
 async def meta_update():
     """Check whether a newer SursumAI version is available."""

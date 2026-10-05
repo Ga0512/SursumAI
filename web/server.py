@@ -10,7 +10,10 @@ import urllib.request
 from pathlib import Path
 
 WEB_DIR = Path(__file__).resolve().parent
-CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", "http://localhost:8001")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core import ports  # noqa: E402
+
+CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", f"http://localhost:{ports.CENTRAL_PORT}")
 
 
 def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, method: str, path: str):
@@ -115,7 +118,7 @@ def _utf8_output() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SursumAI web static server + /api proxy")
-    parser.add_argument("--port", type=int, default=3000)
+    parser.add_argument("--port", type=int, default=ports.WEB_PORT)
     # loopback by default: the UI is for this machine. Exposing it on the
     # network is opt-in via SURSUMAI_BIND (or an explicit --host).
     parser.add_argument("--host", default=os.environ.get("SURSUMAI_BIND", "127.0.0.1"))

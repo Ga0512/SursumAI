@@ -17,7 +17,7 @@ Pick a model, click **Deploy**, and any OpenAI-compatible app can talk to it.
 
 ```bash
 # 1. install (WSL on Windows, Terminal on Linux/macOS)
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.14/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.15/install.sh | bash
 
 # 2. the browser opens at http://localhost:3000 — create an account,
 #    click "+ New", pick a model, click Deploy
@@ -76,7 +76,7 @@ Real deployments on a 6 GB NVIDIA GPU — Qwen3-0.6B and Qwen3-1.7B, live.
 Open a terminal (WSL on Windows, Terminal on Linux/macOS) and run:
 
 ```bash
-curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.14/install.sh | bash
+curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.15/install.sh | bash
 ```
 
 The installer downloads a **released tag** — never a moving branch — and
@@ -113,6 +113,18 @@ sursumai uninstall  # remove SursumAI from this computer
 ```
 
 Or double-click the **SursumAI** icon in your app menu / Windows desktop.
+
+### Running it as a service
+
+The three ports default to 3000 (dashboard), 8001 (API) and 8010 (agent). On a
+server they are yours to choose:
+
+```bash
+SURSUMAI_WEB_PORT=80 SURSUMAI_CENTRAL_PORT=8080 sursumai
+```
+
+`SURSUMAI_BIND=0.0.0.0` makes it reachable from your network instead of this
+machine only. The Base URL shown in the dashboard follows whatever you chose.
 
 To remove it without a terminal: **Settings → Uninstall** in the dashboard. It
 stops your models and deletes the app, its database and the downloaded models.

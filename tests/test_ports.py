@@ -213,3 +213,53 @@ def test_wait_until_free_notices_a_port_being_released():
     start = _time.monotonic()
     assert ports.wait_until_free(busy, timeout=8) is True
     assert _time.monotonic() - start >= 0.5
+
+
+# ---- the three service ports are the host's decision ----
+
+def _ports_with(**env):
+    """core.ports, re-imported with this environment."""
+    import importlib
+    import os
+    import sys
+
+    old = {k: os.environ.get(k) for k in env}
+    os.environ.update({k: v for k, v in env.items() if v is not None})
+    for k, v in env.items():
+        if v is None:
+            os.environ.pop(k, None)
+    try:
+        sys.modules.pop("core.ports", None)
+        return importlib.import_module("core.ports")
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        sys.modules.pop("core.ports", None)
+        importlib.import_module("core.ports")
+
+
+def test_the_defaults_are_what_the_icon_starts():
+    mod = _ports_with(SURSUMAI_WEB_PORT=None, SURSUMAI_CENTRAL_PORT=None, SURSUMAI_AGENT_PORT=None)
+    assert (mod.WEB_PORT, mod.CENTRAL_PORT, mod.AGENT_PORT) == (3000, 8001, 8010)
+
+
+def test_a_host_can_choose_its_own_ports():
+    mod = _ports_with(SURSUMAI_WEB_PORT="80", SURSUMAI_CENTRAL_PORT="8080",
+                      SURSUMAI_AGENT_PORT="8081")
+    assert (mod.WEB_PORT, mod.CENTRAL_PORT, mod.AGENT_PORT) == (80, 8080, 8081)
+
+
+@pytest.mark.parametrize("env,why", [
+    ({"SURSUMAI_CENTRAL_PORT": "9050"}, "deployed models"),   # inside 9000-9099
+    ({"SURSUMAI_WEB_PORT": "abc"}, "not a port number"),
+    ({"SURSUMAI_AGENT_PORT": "99999"}, "outside"),
+    ({"SURSUMAI_WEB_PORT": "8001"}, "three different ports"),  # same as the central
+])
+def test_a_port_that_would_break_the_install_is_refused_at_start(env, why):
+    """SystemExit with a sentence beats three services fighting over a port, or
+    a service sitting where a model is about to listen."""
+    with pytest.raises(SystemExit, match=why):
+        _ports_with(**env)

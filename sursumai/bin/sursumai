@@ -40,9 +40,19 @@ from pathlib import Path
 
 SURSUMAI_ROOT = Path(__file__).resolve().parent.parent.parent
 
-CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", "http://localhost:8001")
-WEB_URL = os.environ.get("SURSUMAI_WEB", "http://localhost:3000")
-AGENT_URL = os.environ.get("AGENT_URL", "http://localhost:8010")
+# The three ports: 3000 / 8001 / 8010 by default, and the host's decision when
+# SursumAI runs as a service (SURSUMAI_WEB_PORT, SURSUMAI_CENTRAL_PORT,
+# SURSUMAI_AGENT_PORT). core/ports.py is where they are read and checked.
+sys.path.insert(0, str(SURSUMAI_ROOT))
+try:
+    from core import ports as _ports
+    WEB_PORT, CENTRAL_PORT, AGENT_PORT = _ports.WEB_PORT, _ports.CENTRAL_PORT, _ports.AGENT_PORT
+except ImportError:          # the CLI must still answer before the code is there
+    WEB_PORT, CENTRAL_PORT, AGENT_PORT = 3000, 8001, 8010
+
+CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", f"http://localhost:{CENTRAL_PORT}")
+WEB_URL = os.environ.get("SURSUMAI_WEB", f"http://localhost:{WEB_PORT}")
+AGENT_URL = os.environ.get("AGENT_URL", f"http://localhost:{AGENT_PORT}")
 # Loopback unless the user opts in; matches start.sh.
 BIND = os.environ.get("SURSUMAI_BIND", "127.0.0.1")
 
@@ -52,9 +62,9 @@ LOG_DIR = Path(os.environ.get("SURSUMAI_LOG_DIR", "/tmp/opencode"))
 RUNNING_VERSION = LOG_DIR / "running-version"   # what the running processes were started from
 
 PORT_INFO = {
-    "web": {"port": 3000, "url": WEB_URL, "pattern": "web/server.py"},
-    "central": {"port": 8001, "url": CENTRAL_URL, "pattern": "uvicorn central.app"},
-    "agent": {"port": 8010, "url": AGENT_URL, "pattern": "uvicorn agent.app"},
+    "web": {"port": WEB_PORT, "url": WEB_URL, "pattern": "web/server.py"},
+    "central": {"port": CENTRAL_PORT, "url": CENTRAL_URL, "pattern": "uvicorn central.app"},
+    "agent": {"port": AGENT_PORT, "url": AGENT_URL, "pattern": "uvicorn agent.app"},
 }
 
 EXIT_OK = 0
@@ -220,9 +230,11 @@ def _start_processes() -> None:
     env = {**os.environ, "AGENT_URL": AGENT_URL, "SURSUMAI_BIND": BIND}
 
     commands = {
-        "agent": [str(py), "-m", "uvicorn", "agent.app:app", "--host", BIND, "--port", "8010"],
-        "central": [str(py), "-m", "uvicorn", "central.app:app", "--host", BIND, "--port", "8001"],
-        "web": [str(py), "web/server.py", "--port", "3000", "--host", BIND],
+        "agent": [str(py), "-m", "uvicorn", "agent.app:app",
+                  "--host", BIND, "--port", str(AGENT_PORT)],
+        "central": [str(py), "-m", "uvicorn", "central.app:app",
+                    "--host", BIND, "--port", str(CENTRAL_PORT)],
+        "web": [str(py), "web/server.py", "--port", str(WEB_PORT), "--host", BIND],
     }
     for name, info in PORT_INFO.items():
         if _port_open(info["port"]):
