@@ -246,3 +246,39 @@ def test_the_token_goes_in_the_authorization_header(monkeypatch):
 
     assert seen["auth"] == f"Bearer {TOKEN}"
     assert seen["url"].endswith("/entitlement")
+
+
+def test_a_revoked_token_is_said_out_loud_but_pro_keeps_working(api, monkeypatch):
+    """Our outage must change nothing; a token that was revoked is different —
+    the Pro module stops updating and one day everything stops with no reason
+    given. Pro still runs until the signed answer expires."""
+    account.connect(TOKEN)
+    api["raise"] = account.AccountError(
+        "this token is not valid — copy it again from your SursumAI account page")
+
+    account.refresh(force=True)
+    status = account.status()
+
+    assert status["pro"] is True
+    assert "no longer valid" in status["warning"]
+
+
+def test_an_outage_says_nothing(api):
+    account.connect(TOKEN)
+    api["raise"] = account.AccountError("could not reach the SursumAI account service")
+
+    account.refresh(force=True)
+
+    assert "warning" not in account.status()
+
+
+def test_a_token_that_works_again_clears_the_warning(api):
+    account.connect(TOKEN)
+    api["raise"] = account.AccountError("this token is not valid — copy it again")
+    account.refresh(force=True)
+    assert "warning" in account.status()
+
+    api["raise"] = None
+    account.refresh(force=True)
+
+    assert "warning" not in account.status()

@@ -1159,3 +1159,5 @@ select.input, .select { cursor: pointer; }
 .fhint { display: block; margin-top: 4px; font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
 .field-check label { display: flex; align-items: center; gap: 8px; }
 .field.hidden { display: none; }
+
+#licensedTo.warn { color: var(--red, #c1274f); }

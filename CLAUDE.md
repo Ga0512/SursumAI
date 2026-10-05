@@ -39,6 +39,11 @@ Cloudflare. **Nunca** gerar outra: todo install confia nesta.
 
 ### Regras que saíram de testes reais e não podem regredir
 
+- **Token revogado é diferente de servidor fora do ar.** O 401 marca
+  `token_invalid` em `~/.sursumai/account.json` e o dashboard avisa, enquanto o
+  Pro continua valendo até o entitlement expirar. Sem isso o módulo Pro parava
+  de atualizar em silêncio e o Pro sumia três semanas depois sem explicação —
+  achado testando numa A40 de verdade.
 - **Nosso servidor fora do ar nunca tira o Pro de quem pagou**: a resposta
   assinada vale até 30 dias e o refresh falha calado. **Reembolso e cancelamento
   funcionam**: no próximo refresh a resposta vem `free`, e o módulo checa Pro

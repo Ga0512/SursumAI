@@ -192,9 +192,15 @@ def refresh(force: bool = False) -> Entitlement | None:
     try:
         signed = _ask(tok)
         ent = verify(signed)
-    except AccountError:
+    except AccountError as e:
+        # Our service being down must change nothing. A token that was revoked
+        # is a different thing: Pro still runs until the signed answer expires,
+        # but the Pro module stops being updated and one day it all stops with
+        # no explanation. Say it, instead of finding out in three weeks.
+        if "copy it again" in str(e):
+            _write({**data, "token_invalid": True})
         return entitlement()
-    _write({**data, "entitlement": signed,
+    _write({**data, "entitlement": signed, "token_invalid": False,
             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     return ent
 
@@ -207,8 +213,14 @@ def disconnect() -> None:
 def status() -> dict:
     """What the dashboard shows."""
     ent = entitlement()
+    data = _read()
     # where "Go Pro" sends people: the same service this machine asks, so a
     # single setting (API) points both at it
     if ent is None:
         return {"pro": False, "connected": token() is not None, "store": API}
-    return {"pro": ent.plan == "pro", "connected": True, "store": API, **ent.to_dict()}
+    out = {"pro": ent.plan == "pro", "connected": True, "store": API, **ent.to_dict()}
+    if data.get("token_invalid"):
+        out["warning"] = ("this machine's token is no longer valid — create a new one on "
+                          "your account page and paste it here. Pro keeps working until "
+                          f"{ent.expires[:10]}.")
+    return out

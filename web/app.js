@@ -1920,8 +1920,11 @@ function renderAccount() {
     document.getElementById("upgradeTitle").textContent = "SursumAI Pro";
     document.getElementById("upgradeSub").textContent =
       "Thank you — Machines is in the tabs above.";
+    // a revoked token keeps working until the signed answer expires; saying so
+    // beats Pro disappearing one morning with no explanation
     document.getElementById("licensedTo").textContent =
-      `Signed in as ${accountState.email || "your account"}.`;
+      accountState.warning || `Signed in as ${accountState.email || "your account"}.`;
+    document.getElementById("licensedTo").classList.toggle("warn", !!accountState.warning);
   }
   const buy = document.getElementById("upgradeBuy");
   // the account service the app talks to is also where people subscribe
