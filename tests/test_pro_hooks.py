@@ -89,3 +89,30 @@ def test_a_deploy_elsewhere_without_the_module_says_why_not_just_fails(client):
     deploy.status = DeployState.HEALTHY
     client.store.update(deploy)
     assert "SursumAI Pro" in central_app._no_endpoint(client.store.get(deploy.id))
+
+
+def test_a_model_that_dies_elsewhere_is_named_by_its_machine(monkeypatch):
+    """"Container is no longer running on the agent" named a thing the user
+    never saw. The message says the machine's name and what to press."""
+    from central import app as central_app
+
+    monkeypatch.setattr(central_app.pro_hooks, "machine_name", lambda mid: "GPU box")
+    deploy = type("D", (), {"machine_id": "m1"})()
+    assert central_app._machine_name(deploy) == "GPU box"
+
+
+def test_without_pro_the_message_still_reads(monkeypatch):
+    from central import app as central_app
+
+    monkeypatch.setattr(central_app.pro_hooks, "machine_name", None)
+    assert central_app._machine_name(type("D", (), {"machine_id": "m1"})()) == "the other machine"
+
+
+def test_a_machine_that_cannot_be_named_does_not_break_the_message(monkeypatch):
+    from central import app as central_app
+
+    def _boom(mid):
+        raise RuntimeError("database closed")
+
+    monkeypatch.setattr(central_app.pro_hooks, "machine_name", _boom)
+    assert central_app._machine_name(type("D", (), {"machine_id": "m1"})()) == "the other machine"

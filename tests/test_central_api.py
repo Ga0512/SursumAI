@@ -541,7 +541,9 @@ def test_a_model_that_is_not_ready_says_so(client):
                              "messages": [{"role": "user", "content": "hi"}]},
                        headers=_auth(key))
     assert resp.status_code == 422
-    assert "not ready" in resp.json()["detail"]
+    # the state AND what to do about it: "not ready" alone sent people to the logs
+    detail = resp.json()["detail"]
+    assert "not running right now" in detail and "Redeploy" in detail
 
 
 def test_a_pool_is_addressable_by_its_name(client, monkeypatch):

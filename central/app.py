@@ -45,6 +45,7 @@ class ProHooks:
     check_target = None         # (machine_id, user) -> None, or HTTPException
     on_destroy = None           # (deploy) -> None: close what reached it
     unreachable_reason = None   # (deploy) -> sentence for the user
+    machine_name = None         # (machine_id) -> what the user called it
     startup: list = []          # blocking callables run in the background at start
     shutdown: list = []         # callables run when the app stops
 
@@ -324,6 +325,16 @@ def _why_it_died(deploy_id: str, deploy) -> str:
     return fallback
 
 
+def _machine_name(deploy) -> str:
+    """The name the user gave the machine, for a message about it."""
+    if pro_hooks.machine_name and deploy.machine_id:
+        try:
+            return pro_hooks.machine_name(deploy.machine_id) or "the other machine"
+        except Exception:  # noqa: BLE001 - naming it is a nicety, not the point
+            log.debug("could not name machine %s", deploy.machine_id)
+    return "the other machine"
+
+
 def _no_endpoint(deploy) -> str:
     """A healthy deploy with no address: here, it is still coming up; on
     another machine, its connection is not open yet."""
@@ -510,7 +521,12 @@ def _reconcile_stale(statuses: set[str] | None = None, remote: bool = True) -> N
             continue
         if not st.get("running"):
             d.status = DeployState.FAILED
-            d.error = "Container is no longer running on the agent"
+            # it used to say "Container is no longer running on the agent":
+            # the wrong word for llama.cpp, a thing the user never saw, and
+            # nothing to do about it
+            d.error = ("the model stopped running"
+                       + (f" on {_machine_name(d)}" if d.machine_id else " on this machine")
+                       + " — press Redeploy to start it again")
             store.update(d)
 
 
@@ -1175,7 +1191,8 @@ def _resolve_target(user: object, model: str):
         raise HTTPException(
             status_code=422,
             detail=_no_endpoint(waiting) if waiting is not None
-            else f"'{model}' is deployed but not ready ({matches[0].status})",
+            else f"'{model}' is not running right now ({matches[0].status})"
+                 " — open it in the dashboard and press Redeploy",
         )
 
     known = sorted({d.spec.model for d in store.list(user.id)
