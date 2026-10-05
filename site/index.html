@@ -16,6 +16,7 @@
       <span class="logo"><svg class="logo-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><rect width="800" height="800" fill="#070228"/><g fill="#fff"><rect x="208" y="130" width="404" height="105" rx="36"/><rect x="208" y="130" width="118" height="238" rx="36"/><rect x="340" y="368" width="120" height="105" rx="22"/><rect x="496" y="474" width="118" height="238" rx="36"/><rect x="208" y="606" width="406" height="106" rx="36"/></g></svg>SursumAI</span>
       <div class="site-links">
         <a class="btn btn-ghost" href="#benchmark">Benchmark</a>
+        <a class="btn btn-ghost" href="#why">Why</a>
         <a class="btn btn-ghost" href="#pricing">Pricing</a>
         <a class="btn btn-ghost" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
         <a class="btn btn-primary" href="#install">Install</a>
@@ -27,9 +28,9 @@
         on your own machine
       </h1>
       <p class="sub">
-        Any open-weight or custom model on your own hardware, with an
-        OpenAI-compatible URL any app can use. No Docker, Python or GPU
-        knowledge required &mdash; and nothing you send ever leaves your machine.
+        Swap <code>api.openai.com</code> for <code>localhost</code>. One command gives you
+        a base URL and an API key, on your own hardware &mdash; no Docker, CUDA or VRAM
+        maths, no per-token bill, and not one byte of your data leaving the building.
       </p>
       <div class="actions">
         <a class="btn btn-primary" href="#install">Install free</a>
@@ -149,6 +150,49 @@
         </div>
       </div>
       <p class="bench-caveat">The router pays when the strong model is far more expensive than the cheap one; with a 0.6B&nbsp;+&nbsp;1.7B pool it saved nothing. Times assume every model stays loaded. <a href="https://github.com/Ga0512/SursumAI/tree/main/bench" target="_blank" rel="noopener">Method, raw data and what didn&rsquo;t work &rarr;</a></p>
+    </div>
+
+    <div class="landing-section" id="why">
+      <h2>Why not the thing you already know?</h2>
+      <p class="landing-sub">The honest version, because you will ask it anyway.</p>
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>&ldquo;I use Ollama&rdquo;</h3>
+          <p>Ollama runs a model on your laptop, and that is where it stops. SursumAI is
+             what comes after: several people, real API keys, live metrics, a router
+             across models &mdash; and the same URL when the model is on a rented GPU.
+             Ollama is for trying things out; this is for something you depend on.</p>
+        </div>
+        <div class="feature">
+          <h3>&ldquo;I use LiteLLM / OpenRouter&rdquo;</h3>
+          <p>Those route you to somebody else's API: you still pay per token and your
+             prompts still leave. SursumAI <strong>is</strong> the provider, on your
+             machine. And its router picks between <em>your</em> models &mdash; the small
+             one answers the easy question, the big one is woken only when it has to be.</p>
+        </div>
+        <div class="feature">
+          <h3>&ldquo;I run vLLM myself&rdquo;</h3>
+          <p>Then you have already lost a day to drivers, images, ports and an
+             out-of-memory at 2am. This is vLLM and llama.cpp with the decisions already
+             made: the GPU is detected, the runtime chosen, the port allocated, the key
+             locked, and a failure is explained in a sentence with the next thing to try.
+             Everything is still there if you want to touch it.</p>
+        </div>
+      </div>
+      <div class="landing-cols" style="margin-top:18px">
+        <div class="landing-col">
+          <h3>Your data never leaves</h3>
+          <p>Lawyers, doctors, accountants, anyone under an NDA: the prompt is the part
+             you cannot send away. Here it never goes anywhere &mdash; the model runs on
+             hardware you control, and we never see a request.</p>
+        </div>
+        <div class="landing-col">
+          <h3>Your bill stops growing</h3>
+          <p>No per-token metering, no per-seat pricing. The machine you already own, or
+             a GPU you rent by the hour when the model is too big for it &mdash; and your
+             code keeps pointing at <code>localhost</code> either way.</p>
+        </div>
+      </div>
     </div>
 
     <div class="landing-section" id="pricing">

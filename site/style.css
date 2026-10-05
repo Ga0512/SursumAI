@@ -1142,3 +1142,12 @@ a.btn { text-decoration: none; }
   .reveal, .reveal.seen { opacity: 1; transform: none; }
   .rotator-logo { animation: none; }
 }
+
+/* the hero now names the two addresses the pitch is about */
+.hero .sub code, .landing-col code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-sunken, rgba(0, 0, 0, 0.06));
+}
