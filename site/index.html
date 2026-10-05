@@ -28,9 +28,8 @@
         on your own machine
       </h1>
       <p class="sub">
-        Swap <code>api.openai.com</code> for <code>localhost</code>. One command gives you
-        a base URL and an API key, on your own hardware &mdash; no Docker, CUDA or VRAM
-        maths, no per-token bill, and not one byte of your data leaving the building.
+        Swap <code>api.openai.com</code> for <code>localhost</code>.<br />
+        One command. Your hardware, your data, no bill per token.
       </p>
       <div class="actions">
         <a class="btn btn-primary" href="#install">Install free</a>
@@ -153,46 +152,36 @@
     </div>
 
     <div class="landing-section" id="why">
-      <h2>Why not the thing you already know?</h2>
-      <p class="landing-sub">The honest version, because you will ask it anyway.</p>
-      <div class="feature-grid">
-        <div class="feature">
-          <h3>&ldquo;I use Ollama&rdquo;</h3>
-          <p>Ollama runs a model on your laptop, and that is where it stops. SursumAI is
-             what comes after: several people, real API keys, live metrics, a router
-             across models &mdash; and the same URL when the model is on a rented GPU.
-             Ollama is for trying things out; this is for something you depend on.</p>
+      <h2>The hard way vs. this</h2>
+      <div class="versus">
+        <div class="versus-col versus-old">
+          <h3>Renting an API</h3>
+          <ul>
+            <li>Pay per token, forever</li>
+            <li>Your prompts leave the building</li>
+            <li>Prices and models change under you</li>
+          </ul>
         </div>
-        <div class="feature">
-          <h3>&ldquo;I use LiteLLM / OpenRouter&rdquo;</h3>
-          <p>Those route you to somebody else's API: you still pay per token and your
-             prompts still leave. SursumAI <strong>is</strong> the provider, on your
-             machine. And its router picks between <em>your</em> models &mdash; the small
-             one answers the easy question, the big one is woken only when it has to be.</p>
+        <div class="versus-col versus-old">
+          <h3>Doing it yourself</h3>
+          <ul>
+            <li>A day of Docker, CUDA and VRAM maths</li>
+            <li>Out of memory at 2am</li>
+            <li>One model, one machine, no API</li>
+          </ul>
         </div>
-        <div class="feature">
-          <h3>&ldquo;I run vLLM myself&rdquo;</h3>
-          <p>Then you have already lost a day to drivers, images, ports and an
-             out-of-memory at 2am. This is vLLM and llama.cpp with the decisions already
-             made: the GPU is detected, the runtime chosen, the port allocated, the key
-             locked, and a failure is explained in a sentence with the next thing to try.
-             Everything is still there if you want to touch it.</p>
-        </div>
-      </div>
-      <div class="landing-cols" style="margin-top:18px">
-        <div class="landing-col">
-          <h3>Your data never leaves</h3>
-          <p>Lawyers, doctors, accountants, anyone under an NDA: the prompt is the part
-             you cannot send away. Here it never goes anywhere &mdash; the model runs on
-             hardware you control, and we never see a request.</p>
-        </div>
-        <div class="landing-col">
-          <h3>Your bill stops growing</h3>
-          <p>No per-token metering, no per-seat pricing. The machine you already own, or
-             a GPU you rent by the hour when the model is too big for it &mdash; and your
-             code keeps pointing at <code>localhost</code> either way.</p>
+        <div class="versus-col versus-new">
+          <h3>SursumAI</h3>
+          <ul>
+            <li>One command</li>
+            <li>An OpenAI URL and a key</li>
+            <li>Nothing leaves your machine</li>
+            <li>Too big for it? Rent a GPU &mdash; same URL</li>
+          </ul>
         </div>
       </div>
+      <p class="versus-note">Ollama runs one model. LiteLLM routes you to someone
+         else&rsquo;s. This is the provider, and it is yours.</p>
     </div>
 
     <div class="landing-section" id="pricing">

@@ -1151,3 +1151,16 @@ a.btn { text-decoration: none; }
   border-radius: 6px;
   background: var(--surface-sunken, rgba(0, 0, 0, 0.06));
 }
+
+/* the comparison: three short columns, the last one ours */
+.versus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+.versus-col { border: 1px solid var(--border); border-radius: var(--r-md, 12px); padding: var(--s5); }
+.versus-col h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: var(--s3); }
+.versus-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.versus-col li { font-size: 0.9rem; color: var(--text-soft); padding-left: 22px; position: relative; }
+.versus-old li::before { content: "×"; position: absolute; left: 4px; color: var(--text-muted); }
+.versus-new { border-color: var(--accent); background: var(--accent-soft, rgba(99, 91, 255, 0.05)); }
+.versus-new li { color: var(--text); }
+.versus-new li::before { content: "✓"; position: absolute; left: 2px; color: var(--accent); font-weight: 700; }
+.versus-note { margin-top: var(--s4); font-size: 0.9rem; color: var(--text-muted); text-align: center; }
+@media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
