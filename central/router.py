@@ -193,8 +193,12 @@ def _weak_strong(store: Store, pool):
 
 
 def _chat(deploy, messages: list[dict], max_tokens: int,
-          temperature: float | None) -> dict:
-    """One non-streaming completion against a deploy, with its own bearer key."""
+          temperature: float | None, extra: dict | None = None) -> dict:
+    """One non-streaming completion against a deploy, with its own bearer key.
+
+    `extra` is what the caller asked for and we do not interpret — a JSON
+    schema, stop strings, a seed. The judge never gets it: it answers in our
+    own words, not the user's format."""
     payload: dict = {
         "model": deploy.spec.model,
         "messages": messages,
@@ -203,20 +207,21 @@ def _chat(deploy, messages: list[dict], max_tokens: int,
     }
     if temperature is not None:
         payload["temperature"] = temperature
+    payload.update(extra or {})
     return agent_client.chat(deploy.endpoint, payload, api_key=deploy.spec.api_key)
 
 
 def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
                      messages: list[dict], max_tokens: int,
-                     temperature: float | None) -> dict:
+                     temperature: float | None, extra: dict | None = None) -> dict:
     """Default: weak responds, LLM judge decides, streak>=2 latches to strong."""
     weak, strong = _weak_strong(store, pool)
 
     if session.latched:
-        return _served(strong, "latched", _chat(strong, messages, max_tokens, temperature),
+        return _served(strong, "latched", _chat(strong, messages, max_tokens, temperature, extra),
                        latched=True)
 
-    weak_result = _chat(weak, messages, max_tokens, temperature)
+    weak_result = _chat(weak, messages, max_tokens, temperature, extra)
     weak_content = _content_of(weak_result)
     bad = not _is_ok(weak_content, weak_result)
     escalate = bad or _judge(store, pool, session.id, user_id, messages, weak_content)
@@ -230,7 +235,7 @@ def route_escalation(store: Store, pool, session: RouterSession, user_id: str,
     if session.streak >= CONFIRMATIONS:
         session.latched = True
         store.upsert_router_session(session)
-        return _served(strong, "escalated", _chat(strong, messages, max_tokens, temperature),
+        return _served(strong, "escalated", _chat(strong, messages, max_tokens, temperature, extra),
                        latched=True)
     store.upsert_router_session(session)
     return _served(weak, "weak_bad" if bad else "weak_ok", weak_result)
@@ -249,12 +254,12 @@ def _run_judge_async(store: Store, pool, session_id: str, user_id: str,
 
 def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
                   messages: list[dict], max_tokens: int,
-                  temperature: float | None) -> dict:
+                  temperature: float | None, extra: dict | None = None) -> dict:
     """Serve the weak reply immediately (zero added latency); judge runs in
     background and decides the latch for the NEXT turn."""
     weak, strong = _weak_strong(store, pool)
 
-    weak_result = _chat(weak, messages, max_tokens, temperature)
+    weak_result = _chat(weak, messages, max_tokens, temperature, extra)
     weak_content = _content_of(weak_result)
 
     def _judge_later() -> None:
@@ -266,7 +271,7 @@ def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
 
     if session.latched:
         # latched: strong serves, but the judge still decides the next turn
-        result = _chat(strong, messages, max_tokens, temperature)
+        result = _chat(strong, messages, max_tokens, temperature, extra)
         _judge_later()
         return _served(strong, "latched", result, latched=True)
 
@@ -276,21 +281,21 @@ def route_advisor(store: Store, pool, session: RouterSession, user_id: str,
 
 def route_stage(store: Store, pool, session: RouterSession, user_id: str,
                 messages: list[dict], max_tokens: int,
-                temperature: float | None) -> dict:
+                temperature: float | None, extra: dict | None = None) -> dict:
     """Rule-based routing (no LLM): keyword heuristics pick weak or strong."""
     weak, strong = _weak_strong(store, pool)
     if session.latched or _stage_wants_strong(messages):
-        return _served(strong, "strong", _chat(strong, messages, max_tokens, temperature),
+        return _served(strong, "strong", _chat(strong, messages, max_tokens, temperature, extra),
                        latched=session.latched)
-    return _served(weak, "weak", _chat(weak, messages, max_tokens, temperature))
+    return _served(weak, "weak", _chat(weak, messages, max_tokens, temperature, extra))
 
 
 def route_round_robin(store: Store, pool, session: RouterSession, user_id: str,
                       messages: list[dict], max_tokens: int,
-                      temperature: float | None) -> dict:
+                      temperature: float | None, extra: dict | None = None) -> dict:
     """Take the next model in the pool, cycling through all N of them."""
     target, decision = _round_robin_pick(store, pool, session)
-    return _served(target, decision, _chat(target, messages, max_tokens, temperature))
+    return _served(target, decision, _chat(target, messages, max_tokens, temperature, extra))
 
 
 def _round_robin_pick(store: Store, pool, session: RouterSession):
@@ -359,7 +364,7 @@ def _classifier_target(store: Store, pool, messages: list[dict]):
 
 def route_classifier(store: Store, pool, session: RouterSession, user_id: str,
                      messages: list[dict], max_tokens: int,
-                     temperature: float | None) -> dict:
+                     temperature: float | None, extra: dict | None = None) -> dict:
     """NVIDIA-style llm_classifier: a judge reads the request and picks the
     single best model among the N candidates of the pool."""
     chosen = _classifier_target(store, pool, messages)
@@ -407,7 +412,7 @@ def pick_target(store: Store, pool, session: RouterSession,
 
 def route_turn(store: Store, pool, session: RouterSession, user_id: str,
                messages: list[dict], max_tokens: int = 512,
-               temperature: float | None = None) -> dict:
+               temperature: float | None = None, extra: dict | None = None) -> dict:
     """Run one routing turn against a pool, dispatching by pool.mode.
 
     Returns {"served": deploy_id, "served_model": str, "served_endpoint": str,
@@ -415,4 +420,4 @@ def route_turn(store: Store, pool, session: RouterSession, user_id: str,
              "usage": dict, "latched": bool}.
     """
     handler = ROUTE_MODES.get(pool.mode, route_escalation)
-    return handler(store, pool, session, user_id, messages, max_tokens, temperature)
+    return handler(store, pool, session, user_id, messages, max_tokens, temperature, extra)

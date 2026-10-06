@@ -194,6 +194,12 @@ class ChatRequest(BaseModel):
     stream: bool = False
     chat_template_kwargs: dict | None = None
     reasoning_effort: str | None = None
+    response_format: dict | None = None
+    stop: list[str] | str | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
 
 
 class ApiKeyRequest(BaseModel):
@@ -219,6 +225,16 @@ class RouterChatRequest(BaseModel):
     # the two ways a client asks for an answer without the model thinking first
     chat_template_kwargs: dict | None = None
     reasoning_effort: str | None = None
+    # standard OpenAI fields that used to be dropped on the floor here.
+    # response_format is the big one: with a schema the runtime generates only
+    # the JSON, which on a parsing job is most of the tokens — and most of the
+    # time — saved.
+    response_format: dict | None = None
+    stop: list[str] | str | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
 
 
 # Asking a Qwen-style model not to think has two halves, and only one of them
@@ -230,6 +246,17 @@ class RouterChatRequest(BaseModel):
 # the model actually obeys. The message the user wrote is not rewritten
 # anywhere else: this is the last thing done before it leaves.
 NO_THINK = "/no_think"
+
+# What we hand to the runtime untouched when the caller sends it. Everything
+# here is standard OpenAI and understood by both vLLM and llama.cpp; a field we
+# do not list is a field the caller silently loses, which is how
+# `response_format` was being ignored.
+PASSTHROUGH = ("response_format", "stop", "top_p",
+               "frequency_penalty", "presence_penalty", "seed")
+
+
+def _passthrough(req) -> dict:
+    return {f: getattr(req, f) for f in PASSTHROUGH if getattr(req, f, None) is not None}
 
 
 def _wants_no_thinking(req) -> bool:
@@ -943,6 +970,7 @@ async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_curre
     }
     if req.temperature is not None:
         payload["temperature"] = req.temperature
+    payload.update(_passthrough(req))
     if req.stream:
         return StreamingResponse(
             agent_client.chat_stream(deploy.endpoint, payload,
@@ -1148,7 +1176,8 @@ def _relabel_upstream(raw: bytes, label: str, session_id: str | None) -> bytes |
 
 def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
                         user_id: str, messages: list[dict], created: int,
-                        max_tokens: int, temperature: float | None):
+                        max_tokens: int, temperature: float | None,
+                        extra: dict | None = None):
     """Stream a routed answer.
 
     When the mode can decide who answers before generating (stage,
@@ -1174,6 +1203,7 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
         }
         if temperature is not None:
             payload["temperature"] = temperature
+        payload.update(extra or {})
         for raw in agent_client.chat_stream(deploy.endpoint, payload,
                                             api_key=deploy.spec.api_key):
             out = _relabel_upstream(raw, label, session.id)
@@ -1186,7 +1216,7 @@ def _iter_router_stream(store: Store, pool: Pool, session: RouterSession,
 
     try:
         outcome = router_mod.route_turn(
-            store, pool, session, user_id, messages, max_tokens, temperature,
+            store, pool, session, user_id, messages, max_tokens, temperature, extra,
         )
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -1302,6 +1332,7 @@ async def _chat_with_deploy(deploy, req: RouterChatRequest):
     }
     if req.temperature is not None:
         payload["temperature"] = req.temperature
+    payload.update(_passthrough(req))
     # llama-server answers with the file it loaded ("/models/Qwen3-1.7B-Q8_0.gguf")
     # as `model`. A client asked for a model by name and gets that name back.
     if req.stream:
@@ -1373,14 +1404,15 @@ async def openai_chat(req: RouterChatRequest, user=Depends(_api_user)):
     if req.stream:
         return StreamingResponse(
             _iter_router_stream(store, pool, session, user.id, req.messages,
-                                created, req.max_tokens, req.temperature),
+                                created, req.max_tokens, req.temperature,
+                                _passthrough(req)),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     try:
         outcome = await asyncio.to_thread(
             router_mod.route_turn, store, pool, session, user.id, req.messages,
-            req.max_tokens, req.temperature,
+            req.max_tokens, req.temperature, _passthrough(req),
         )
     except Exception as e:
         log.exception("router turn failed for pool %s", pool.id)

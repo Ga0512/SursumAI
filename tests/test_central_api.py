@@ -739,3 +739,46 @@ def test_an_image_with_no_text_still_gets_it(client):
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
     ]}])
     assert out[0]["content"][-1] == {"type": "text", "text": "/no_think"}
+
+
+# ---- standard OpenAI fields reach the model ----
+
+def test_response_format_and_friends_are_forwarded(client):
+    """They used to be dropped here: a client asking for JSON got prose, and
+    paid for every token of it."""
+    from central import app as central_app
+
+    req = central_app.RouterChatRequest(
+        messages=[{"role": "user", "content": "extract"}],
+        response_format={"type": "json_schema", "json_schema": {"name": "f", "schema": {}}},
+        stop=["\n\n"], top_p=0.9, seed=7)
+    sent = central_app._passthrough(req)
+
+    assert sent["response_format"]["type"] == "json_schema"
+    assert sent["stop"] == ["\n\n"] and sent["top_p"] == 0.9 and sent["seed"] == 7
+
+
+def test_what_was_not_asked_for_is_not_invented(client):
+    from central import app as central_app
+
+    req = central_app.RouterChatRequest(messages=[{"role": "user", "content": "oi"}])
+    assert central_app._passthrough(req) == {}
+
+
+def test_a_pool_passes_them_to_whoever_answers(client, monkeypatch):
+    """A schema has to survive the router, or the same request gives JSON on a
+    model and prose on a pool."""
+    from central import agent_client, router as router_mod
+
+    seen = {}
+
+    def _chat(endpoint, payload, api_key=None, timeout=None):
+        seen.update(payload)
+        return {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+
+    monkeypatch.setattr(agent_client, "chat", _chat)
+    deploy = type("D", (), {"endpoint": "http://x/v1",
+                            "spec": type("S", (), {"model": "org/m", "api_key": "k"})()})()
+    router_mod._chat(deploy, [{"role": "user", "content": "hi"}], 100, None,
+                     {"response_format": {"type": "json_object"}})
+    assert seen["response_format"] == {"type": "json_object"}

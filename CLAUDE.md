@@ -257,6 +257,17 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
   conversa na tela continua sendo o que a pessoa digitou; em mensagem de visão
   o sufixo vai na parte de texto, nunca como parte nova. O "Fast" do Playground
   e do chat de pool manda o argumento — a tradução mora num lugar só.
+- **Campo padrão da OpenAI que o central não repassa é campo que o usuário
+  perde.** `PASSTHROUGH` em `central/app.py` (`response_format`, `stop`,
+  `top_p`, `frequency_penalty`, `presence_penalty`, `seed`) vai para o modelo e
+  **também para o pool** (`router._chat(..., extra)`), senão o mesmo pedido dá
+  JSON num modelo e prosa num pool. `response_format` estava sendo descartado
+  calado: quem pedia JSON schema recebia texto.
+- **`--reasoning-budget 0` não desliga o pensamento** — ele fecha a etiqueta e o
+  raciocínio **vaza para a resposta** (medido num Qwen3 1.7B: 805 tokens de
+  divagação em inglês dentro do `content`, contra 342 tokens de resposta limpa
+  com o caminho do template). Não oferecer isso como opção. O que funciona é o
+  `enable_thinking:false` + `/no_think` que o central já traduz.
 - **API 100% default**: não mexer no thinking do modelo — sem `enable_thinking:false`. Reasoning conta em `completion_tokens` (verificado empiricamente). Um modelo pode gastar todo o contexto em reasoning (`content` vazio, `finish:length`) — aceito.
 - **Timeout de chat é `SURSUMAI_CHAT_TIMEOUT` (900 s)**, não 180: modelo que raciocina num notebook pensa por minutos, e o timeout antigo cortava e dizia "unreachable" com o modelo vivo. Timeout diz que o modelo está demorando; só conexão recusada diz unreachable. O juiz do router tem `JUDGE_MAX_TOKENS = 1024` pelo mesmo motivo — com 120 um juiz que pensa devolvia veredito vazio e o router nunca escalava. Preflight de porta espera até `SURSUMAI_PORT_WAIT` (90 s) por uma porta recém-liberada (o Docker Desktop leva 30 s+).
 - **URL que o usuário copia é sempre absoluta e sempre `/v1`.** `API` (`"/api"`) é relativo e só funciona dentro da página, pelo proxy do web; snippets, Base URL e o curl do Playground usam `publicBaseUrl()` (`http://<host>:8001/v1`). Um snippet com `base_url="/api/v1"` quebrou no primeiro `python`, e o curl de modelo apontava para `/deploys/{id}/chat` — rota de gerenciamento que recusa API key com 403.
