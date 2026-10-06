@@ -600,3 +600,40 @@ def test_no_flag_we_send_is_unknown_to_the_pinned_llama_server():
                      threads=8, flash_attn=True, gpu_layers="auto")
     sent = {a for a in cmd if a.startswith("--")}
     assert sent <= known, sent - known
+
+
+# ---- two deploys of the same model do not race for the file ----
+
+def test_the_second_deploy_waits_instead_of_loading_half_a_file(tmp_path, monkeypatch):
+    """Seen on a real GPU: two deploys of the same model started two downloads
+    into one folder, and the second tried to load a file that was not there
+    yet — "failed to load model ... No such file or directory"."""
+    import threading
+
+    monkeypatch.setattr(ex, "DOWNLOAD_WAIT", 5)
+    monkeypatch.setattr(ex.time, "sleep", lambda s: None)
+    order = []
+
+    def hold(name):
+        with ex._one_download_at_a_time(tmp_path, "d" * 32):
+            order.append("entrou " + name)
+            order.append("saiu " + name)
+
+    first = threading.Thread(target=hold, args=("a",))
+    first.start()
+    first.join()
+    hold("b")
+
+    assert order == ["entrou a", "saiu a", "entrou b", "saiu b"]
+    assert not (tmp_path / ".downloading").exists()      # the lock is let go
+
+
+def test_a_lock_left_by_a_crash_does_not_block_forever(tmp_path, monkeypatch):
+    monkeypatch.setattr(ex, "DOWNLOAD_WAIT", 0)
+    monkeypatch.setattr(ex.time, "sleep", lambda s: None)
+    (tmp_path / ".downloading").write_text("")       # nobody is downloading
+
+    with ex._one_download_at_a_time(tmp_path, "d" * 32):
+        pass
+
+    assert not (tmp_path / ".downloading").exists()

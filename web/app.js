@@ -858,6 +858,7 @@ async function refreshLogs() {
 const TUNING = [
   ["f_name", "name", "text"],
   ["f_kv", "kv_cache", "text"],
+  ["f_thinking", "thinking", "text"],
   ["f_parallel", "parallel", "int"],
   ["f_top_p", "top_p", "float"],
   ["f_repeat", "repeat_penalty", "float"],
@@ -893,7 +894,7 @@ function tuningFields() {
 }
 
 const vllmDefault = (f) => ({ quantization: "", trust_remote_code: false, cpu_offload_gb: 0 }[f]);
-const llamaDefault = (f) => ({ gpu_layers: "", threads: 0, flash_attn: false,
+const llamaDefault = (f) => ({ gpu_layers: "", threads: 0, flash_attn: false, thinking: "",
                                top_p: 0, repeat_penalty: 0 }[f]);
 
 function fillTuning(spec) {

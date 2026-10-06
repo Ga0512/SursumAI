@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import functools
+import contextlib
 import json
 import os
 import platform
@@ -57,6 +58,9 @@ def _image(spec: Spec | None = None) -> str:
 CONTAINER_KEY = "/run/sursumai/api.key"  # where the key file is mounted
 LOGS_DIR = Path(__file__).resolve().parent.parent / "sursumai-logs"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "llama-models"
+
+DOWNLOAD_WAIT = float(os.environ.get("SURSUMAI_DOWNLOAD_WAIT", 3600))
+"""How long to wait for another deploy that is downloading the same model."""
 BIN_DIR = Path(__file__).resolve().parent.parent / "llama-bin"
 BIN_VERSION = "b10327"  # pinned llama.cpp release (security: no silent upgrade)
 # The official llama.cpp releases ship no CUDA build for Linux. The
@@ -581,6 +585,39 @@ def preflight(spec: Spec) -> list[dict]:
 
 # ---- GGUF download ----
 
+@contextlib.contextmanager
+def _one_download_at_a_time(local_dir: Path, deploy_id: str):
+    """Hold the folder while downloading, and make anyone else wait.
+
+    Two deploys of the same model start two downloads into the same folder, and
+    the second one tried to load a file the first had not finished writing:
+    "failed to load model ... No such file or directory", on a real GPU, with
+    nothing wrong except the timing."""
+    lock = local_dir / ".downloading"
+    waited = 0.0
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+            break
+        except FileExistsError:
+            if waited == 0:
+                _log(deploy_id, "=== waiting for another deploy to finish downloading ===")
+            if waited > DOWNLOAD_WAIT:
+                raise TransportError(
+                    "another deploy has been downloading this model for too long") from None
+            # a crash leaves the file behind; an old one is not a running download
+            if time.time() - lock.stat().st_mtime > DOWNLOAD_WAIT:
+                lock.unlink(missing_ok=True)
+                continue
+            time.sleep(5)
+            waited += 5
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def _download_gguf(spec: Spec, resolved: dict, deploy_id: str) -> dict[str, str]:
     """Download GGUF (+ mmproj) into a per-model dir, verifying GGUF magic bytes."""
     model = resolved["model"]
@@ -608,9 +645,10 @@ def _download_gguf(spec: Spec, resolved: dict, deploy_id: str) -> dict[str, str]
             raise TransportError(f"downloaded file is not a valid GGUF: {filename}")
         return str(target)
 
-    paths = {"gguf": _fetch(resolved["gguf"])}
-    if resolved["mmproj"]:
-        paths["mmproj"] = _fetch(resolved["mmproj"])
+    with _one_download_at_a_time(local_dir, deploy_id):
+        paths = {"gguf": _fetch(resolved["gguf"])}
+        if resolved["mmproj"]:
+            paths["mmproj"] = _fetch(resolved["mmproj"])
     return paths
 
 
@@ -639,6 +677,14 @@ def _advanced_args(spec: Spec) -> list[str]:
         args += ["--repeat-penalty", str(spec.repeat_penalty)]
     if spec.flash_attn:
         args += ["--flash-attn", "on"]
+    if spec.thinking:
+        # Applied where the prompt is actually built, so every client gets it
+        # without knowing. Qwen3.8's template closes `<think></think>` itself
+        # when enable_thinking is false — the model never starts. The levels go
+        # to reasoning_effort, which that template defaults to "xhigh".
+        kwargs = ({"enable_thinking": False} if spec.thinking == "off"
+                  else {"reasoning_effort": spec.thinking})
+        args += ["--chat-template-kwargs", json.dumps(kwargs)]
     return args
 
 

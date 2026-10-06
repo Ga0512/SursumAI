@@ -12,6 +12,9 @@ class SpecError(Exception):
 # never disagree about it.
 KV_CACHE_TYPES = ("f16", "q8_0", "q4_0")
 VLLM_QUANTIZATIONS = ("awq", "gptq", "fp8", "bitsandbytes", "gguf")
+# What a reasoning model's chat template understands. "off" closes the thinking
+# block before the model writes a word; the others are Qwen3.8's own levels.
+THINKING_LEVELS = ("off", "low", "medium", "xhigh")
 
 
 @dataclass
@@ -36,6 +39,9 @@ class Spec:
     parallel: int | None = None        # how many conversations at once
     top_p: float | None = None
     repeat_penalty: float | None = None
+    # how hard the model thinks before answering, for every request this deploy
+    # serves: "" (the model's own default), "off", "low", "medium", "xhigh"
+    thinking: str = ""
     # llama.cpp only
     gpu_layers: str = ""               # "" = auto (splits GPU/CPU), or a number
     threads: int | None = None
@@ -88,6 +94,8 @@ class Spec:
             raise SpecError("top_p must be between 0 and 1")
         if self.repeat_penalty is not None and not 0 < self.repeat_penalty <= 5:
             raise SpecError("repeat penalty must be between 0 and 5")
+        if self.thinking and self.thinking not in THINKING_LEVELS:
+            raise SpecError(f"thinking must be one of: {', '.join(THINKING_LEVELS)}")
         if self.runtime == "llama":
             if self.gpu_layers and self.gpu_layers != "auto" and not self.gpu_layers.isdigit():
                 raise SpecError("GPU layers must be a number, or 'auto'")
@@ -120,6 +128,7 @@ class Spec:
             "parallel": self.parallel,
             "top_p": self.top_p,
             "repeat_penalty": self.repeat_penalty,
+            "thinking": self.thinking,
             "gpu_layers": self.gpu_layers,
             "threads": self.threads,
             "flash_attn": self.flash_attn,

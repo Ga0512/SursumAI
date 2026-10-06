@@ -252,6 +252,19 @@
               <span class="fhint">Shrinks what the context costs in memory, so a longer
                 conversation fits on the same card.</span>
             </div>
+            <div class="field llama-only">
+              <label>Thinking</label>
+              <select id="f_thinking" class="input">
+                <option value="">The model's default</option>
+                <option value="off">Off — answer straight away</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="xhigh">Maximum</option>
+              </select>
+              <span class="fhint">A reasoning model writes its thinking before the answer,
+                and you wait for all of it. Off is fastest and worse at problems that need
+                working out. Applies to everyone who calls this model.</span>
+            </div>
             <div class="field">
               <label>Conversations at once</label>
               <input id="f_parallel" class="input" type="number" min="1" max="256" placeholder="auto" />

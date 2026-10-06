@@ -263,6 +263,22 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
   **também para o pool** (`router._chat(..., extra)`), senão o mesmo pedido dá
   JSON num modelo e prosa num pool. `response_format` estava sendo descartado
   calado: quem pedia JSON schema recebia texto.
+- **Desligar o raciocínio é no deploy, pela flag do template.** `Spec.thinking`
+  (`""`, `off`, `low`, `medium`, `xhigh`) vira
+  `--chat-template-kwargs {"enable_thinking": false}` ou
+  `{"reasoning_effort": "<nível>"}` na subida do servidor, que é onde o prompt é
+  montado. Medido num Qwen3.8 27B numa RTX 6000 Ada, extração de campos: 1175
+  tokens e 26,1 s com raciocínio, **176 tokens e 4,5 s sem** — e `reasoning_content`
+  vazio, sem `<think>` e sem divagação vazando no texto. A requisição ainda manda
+  no que pedir: `chat_template_kwargs:{enable_thinking:true}` liga de volta num
+  deploy desligado (`reasoning_effort` só vale com o pensamento ligado).
+  **`/no_think` é o Qwen3 de 2025** e não existe no template do Qwen3.8 — por isso
+  mandamos os dois.
+- **Documento longo em lote: contexto é compartilhado entre as conversas.** 25 mil
+  caracteres dão ~7 mil tokens; quatro ao mesmo tempo com `max_model_len` 16384
+  devolvem "Context size has been exceeded". A conta é
+  `max_model_len ≥ paralelos × tokens do maior documento`. Com 40960 e 4 slots:
+  4,7 s um documento, **1,9 s por documento em lote de 4**.
 - **`--reasoning-budget 0` não desliga o pensamento** — ele fecha a etiqueta e o
   raciocínio **vaza para a resposta** (medido num Qwen3 1.7B: 805 tokens de
   divagação em inglês dentro do `content`, contra 342 tokens de resposta limpa

@@ -62,12 +62,22 @@ def _request(method: str, path: str, body: dict | None = None, timeout: float = 
         raise AgentError(f"agent unreachable at {base}: {e}") from None
 
 
+# The preflight waits up to SURSUMAI_PORT_WAIT (90 s) for a port the previous
+# model is still letting go of. Asking for 60 s meant a legitimate wait came
+# back as "agent unreachable", which sent people to debug a machine that was
+# answering perfectly — seen on a real GPU while redeploying.
+PREFLIGHT_TIMEOUT = float(os.environ.get("SURSUMAI_PORT_WAIT", 90)) + 30
+
+
 def start(deploy_id: str, spec: dict, agent: str | None = None) -> dict:
-    return _request("POST", "/deploys", {"deploy_id": deploy_id, "spec": spec}, agent=agent)
+    # starting loads the model and may wait for a port, like the preflight
+    return _request("POST", "/deploys", {"deploy_id": deploy_id, "spec": spec},
+                    timeout=PREFLIGHT_TIMEOUT, agent=agent)
 
 
 def preflight(spec: dict, agent: str | None = None) -> dict:
-    return _request("POST", "/preflight", {"spec": spec}, timeout=60.0, agent=agent)
+    return _request("POST", "/preflight", {"spec": spec},
+                    timeout=PREFLIGHT_TIMEOUT, agent=agent)
 
 
 def status(deploy_id: str, agent: str | None = None) -> dict:

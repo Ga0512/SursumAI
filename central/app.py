@@ -148,6 +148,7 @@ class DeployRequest(BaseModel):
     # Advanced: unset means the runtime decides, which is how most deploys run
     name: str = ""
     kv_cache: str = ""
+    thinking: str = ""
     parallel: int | None = None
     top_p: float | None = None
     repeat_penalty: float | None = None
@@ -175,6 +176,7 @@ class RedeployRequest(BaseModel):
     hf_token: str | None = None
     name: str | None = None
     kv_cache: str | None = None
+    thinking: str | None = None
     parallel: int | None = None
     top_p: float | None = None
     repeat_penalty: float | None = None
@@ -252,7 +254,13 @@ NO_THINK = "/no_think"
 # do not list is a field the caller silently loses, which is how
 # `response_format` was being ignored.
 PASSTHROUGH = ("response_format", "stop", "top_p",
-               "frequency_penalty", "presence_penalty", "seed")
+               "frequency_penalty", "presence_penalty", "seed",
+               # these two were being read to decide about /no_think and then
+               # thrown away. Qwen3.8's template has no /no_think at all: it
+               # reads `enable_thinking` and `reasoning_effort` (xhigh default,
+               # also medium and low), so dropping them left the model at
+               # maximum reasoning no matter what the client asked for.
+               "chat_template_kwargs", "reasoning_effort")
 
 
 def _passthrough(req) -> dict:
@@ -260,10 +268,16 @@ def _passthrough(req) -> dict:
 
 
 def _wants_no_thinking(req) -> bool:
+    """Whether to also say it in the prompt.
+
+    `/no_think` is the Qwen3 (2025) soft switch and is still what those models
+    obey. Qwen3.8 does not know the words — its template reads the kwargs
+    instead — so both go out: the kwargs for the templates that read them, the
+    words for the templates that do not. Neither harms the other."""
     kwargs = req.chat_template_kwargs or {}
     if kwargs.get("enable_thinking") is False or kwargs.get("thinking") is False:
         return True
-    return (req.reasoning_effort or "").lower() in ("none", "minimal")
+    return (req.reasoning_effort or "").lower() in ("none", "minimal", "low")
 
 
 def _add_no_think(messages: list[dict]) -> list[dict]:
