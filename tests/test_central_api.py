@@ -667,3 +667,75 @@ def test_a_deploy_that_stops_moving_is_given_up_on(client, monkeypatch):
                         lambda deploy_id, agent=None: {"healthy": False, "stage": "stuck",
                                                        "log_bytes": 10})
     assert asyncio.run(central_app._wait_healthy("d1")) is False
+
+
+# ---- "do not think": the flag and the words the model obeys ----
+
+@pytest.mark.parametrize("body", [
+    {"chat_template_kwargs": {"enable_thinking": False}},
+    {"chat_template_kwargs": {"thinking": False}},
+    {"reasoning_effort": "none"},
+    {"reasoning_effort": "minimal"},
+])
+def test_asking_for_no_reasoning_also_says_it_in_the_prompt(client, body):
+    """Measured on a 27B through llama.cpp: the flag alone changed nothing
+    (8216 chars of reasoning), `/no_think` in the message took it to 677."""
+    from central import app as central_app
+
+    req = central_app.RouterChatRequest(
+        messages=[{"role": "user", "content": "oi"}], **body)
+    assert central_app._wants_no_thinking(req) is True
+    assert central_app._add_no_think(req.messages)[-1]["content"] == "oi /no_think"
+
+
+def test_a_normal_request_is_not_touched(client):
+    from central import app as central_app
+
+    req = central_app.RouterChatRequest(messages=[{"role": "user", "content": "oi"}])
+    assert central_app._wants_no_thinking(req) is False
+    req = central_app.RouterChatRequest(
+        messages=[{"role": "user", "content": "oi"}],
+        chat_template_kwargs={"enable_thinking": True})
+    assert central_app._wants_no_thinking(req) is False
+
+
+def test_it_lands_on_the_last_thing_the_user_said(client):
+    from central import app as central_app
+
+    out = central_app._add_no_think([
+        {"role": "user", "content": "primeira"},
+        {"role": "assistant", "content": "resposta"},
+        {"role": "user", "content": "segunda"},
+    ])
+    assert out[0]["content"] == "primeira"          # history is left alone
+    assert out[2]["content"] == "segunda /no_think"
+
+
+def test_it_is_not_said_twice(client):
+    from central import app as central_app
+
+    out = central_app._add_no_think([{"role": "user", "content": "oi /no_think"}])
+    assert out[0]["content"] == "oi /no_think"
+
+
+def test_a_vision_message_carries_it_in_its_text_part(client):
+    """The content is a list there; appending to the list would make a second
+    text part, and the image must stay where it is."""
+    from central import app as central_app
+
+    out = central_app._add_no_think([{"role": "user", "content": [
+        {"type": "text", "text": "o que e isto?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]}])
+    parts = out[0]["content"]
+    assert parts[0]["text"] == "o que e isto? /no_think"
+    assert parts[1]["type"] == "image_url"
+
+
+def test_an_image_with_no_text_still_gets_it(client):
+    from central import app as central_app
+
+    out = central_app._add_no_think([{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]}])
+    assert out[0]["content"][-1] == {"type": "text", "text": "/no_think"}

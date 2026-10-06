@@ -192,6 +192,8 @@ class ChatRequest(BaseModel):
     max_tokens: int = 512
     temperature: float | None = None
     stream: bool = False
+    chat_template_kwargs: dict | None = None
+    reasoning_effort: str | None = None
 
 
 class ApiKeyRequest(BaseModel):
@@ -214,6 +216,51 @@ class RouterChatRequest(BaseModel):
     temperature: float | None = None
     stream: bool = False
     session_id: str | None = None
+    # the two ways a client asks for an answer without the model thinking first
+    chat_template_kwargs: dict | None = None
+    reasoning_effort: str | None = None
+
+
+# Asking a Qwen-style model not to think has two halves, and only one of them
+# works on its own. Measured on a 27B through llama.cpp, same prompt:
+#   nothing                       5280 chars of reasoning, 67 s
+#   chat_template_kwargs          8216 chars, 99 s   (the runtime ignored it)
+#   /no_think in the message       677 chars, 10 s
+# So a client that sends the flag gets the flag passed through AND the words
+# the model actually obeys. The message the user wrote is not rewritten
+# anywhere else: this is the last thing done before it leaves.
+NO_THINK = "/no_think"
+
+
+def _wants_no_thinking(req) -> bool:
+    kwargs = req.chat_template_kwargs or {}
+    if kwargs.get("enable_thinking") is False or kwargs.get("thinking") is False:
+        return True
+    return (req.reasoning_effort or "").lower() in ("none", "minimal")
+
+
+def _add_no_think(messages: list[dict]) -> list[dict]:
+    """Put /no_think on the last thing the user said."""
+    out = [dict(m) for m in messages]
+    for m in reversed(out):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            if NO_THINK not in content:
+                m["content"] = f"{content} {NO_THINK}".strip()
+        elif isinstance(content, list):
+            # a vision message: the text part is the one that carries it
+            parts = [dict(p) for p in content]
+            for part in parts:
+                if part.get("type") == "text" and NO_THINK not in (part.get("text") or ""):
+                    part["text"] = f"{part.get('text', '')} {NO_THINK}".strip()
+                    break
+            else:
+                parts.append({"type": "text", "text": NO_THINK})
+            m["content"] = parts
+        break
+    return out
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -890,7 +937,7 @@ async def chat_with_deploy(deploy_id: str, req: ChatRequest, user=Depends(_curre
         raise HTTPException(status_code=409, detail=_no_endpoint(deploy))
     payload: dict = {
         "model": deploy.spec.model,
-        "messages": req.messages,
+        "messages": _add_no_think(req.messages) if _wants_no_thinking(req) else req.messages,
         "max_tokens": req.max_tokens,
         "stream": req.stream,
     }
@@ -1302,6 +1349,8 @@ async def openai_chat(req: RouterChatRequest, user=Depends(_api_user)):
     the user + pool. Sessions expire after inactivity (latch resets)."""
     if not req.messages:
         raise HTTPException(status_code=422, detail="messages required")
+    if _wants_no_thinking(req):
+        req.messages = _add_no_think(req.messages)
     if req.session_id is not None and len(req.session_id) > SESSION_ID_MAX:
         raise HTTPException(status_code=422, detail="session_id too long")
 

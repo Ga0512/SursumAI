@@ -1161,3 +1161,8 @@ select.input, .select { cursor: pointer; }
 .field.hidden { display: none; }
 
 #licensedTo.warn { color: var(--red, #c1274f); }
+
+/* "Fast": skip the model's reasoning, by sending /no_think with the message */
+.nothink { display: flex; align-items: center; gap: 6px; font-size: 0.8rem;
+  color: var(--text-muted); white-space: nowrap; cursor: pointer; user-select: none; }
+.nothink input { cursor: pointer; }

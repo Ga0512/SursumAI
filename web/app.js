@@ -1204,7 +1204,8 @@ async function sendPlay() {
     const res = await fetch(`${API}/deploys/${detailId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ messages: getPlayHistory(), max_tokens: 2048, stream: true }),
+      body: JSON.stringify({ messages: getPlayHistory(), max_tokens: 2048, stream: true,
+                             ...noThinkBody("playNoThink") }),
       signal: playController.signal,
     });
     if (!res.ok) {
@@ -1391,6 +1392,16 @@ function escapeHtml(s) {
 }
 
 /* ---- dashboard tabs (deploys / chat) ---- */
+/* "Fast": ask for an answer without the model thinking first. The page sends
+   the standard flag and the central turns it into what the model obeys, so the
+   conversation on screen stays exactly what the person typed. Off by default:
+   a model's own behaviour is what its author published, and the answer is
+   worse at anything that needs working out. */
+function noThinkBody(checkboxId) {
+  const box = document.getElementById(checkboxId);
+  return box && box.checked ? { chat_template_kwargs: { enable_thinking: false } } : {};
+}
+
 /* ---- settings ---- */
 async function loadSettings() {
   try {
@@ -1809,8 +1820,8 @@ async function sendChat() {
     const url = isPool ? `${API}/v1/chat/completions` : `${API}/deploys/${target}/chat`;
     const body = isPool
       ? { model: target.slice(5), messages: history, max_tokens: 2048, stream: true,
-          session_id: chatSessions[target] || undefined }
-      : { messages: history, max_tokens: 2048, stream: true };
+          session_id: chatSessions[target] || undefined, ...noThinkBody("chatNoThink") }
+      : { messages: history, max_tokens: 2048, stream: true, ...noThinkBody("chatNoThink") };
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },

@@ -247,6 +247,16 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
 - Migrações em `central/db.py` são `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE`; adicionar coluna nova segue esse padrão (não recriar tabela). Exceção deliberada: `sessions` foi recriada porque token em texto puro não migra.
 - Ciclo de vida das apps é `lifespan` (não `@app.on_event`, depreciado na versão pinada do FastAPI); o `lifespan` do central cancela os loops de background ao encerrar.
 - **Não engolir exceção.** `except Exception: pass` some com bug real (o `_metrics_loop` fazia isso e falha de scrape ficava idêntica a modelo ocioso). Use `log.debug` para o esperado e `log.exception` para o resto.
+- **"Não pense" é o argumento MAIS as palavras.** Quem manda
+  `chat_template_kwargs:{enable_thinking:false}` (ou `thinking:false`, ou
+  `reasoning_effort` `none`/`minimal`) recebe também um `/no_think` na última
+  mensagem do usuário — `_wants_no_thinking` + `_add_no_think` em
+  `central/app.py`. Medido num 27B por llama.cpp, mesmo prompt: sem nada 5280
+  chars de raciocínio em 67 s; só o argumento 8216 chars em 99 s (o runtime
+  ignorou); com `/no_think` 677 chars em 10 s. O histórico não é reescrito e a
+  conversa na tela continua sendo o que a pessoa digitou; em mensagem de visão
+  o sufixo vai na parte de texto, nunca como parte nova. O "Fast" do Playground
+  e do chat de pool manda o argumento — a tradução mora num lugar só.
 - **API 100% default**: não mexer no thinking do modelo — sem `enable_thinking:false`. Reasoning conta em `completion_tokens` (verificado empiricamente). Um modelo pode gastar todo o contexto em reasoning (`content` vazio, `finish:length`) — aceito.
 - **Timeout de chat é `SURSUMAI_CHAT_TIMEOUT` (900 s)**, não 180: modelo que raciocina num notebook pensa por minutos, e o timeout antigo cortava e dizia "unreachable" com o modelo vivo. Timeout diz que o modelo está demorando; só conexão recusada diz unreachable. O juiz do router tem `JUDGE_MAX_TOKENS = 1024` pelo mesmo motivo — com 120 um juiz que pensa devolvia veredito vazio e o router nunca escalava. Preflight de porta espera até `SURSUMAI_PORT_WAIT` (90 s) por uma porta recém-liberada (o Docker Desktop leva 30 s+).
 - **URL que o usuário copia é sempre absoluta e sempre `/v1`.** `API` (`"/api"`) é relativo e só funciona dentro da página, pelo proxy do web; snippets, Base URL e o curl do Playground usam `publicBaseUrl()` (`http://<host>:8001/v1`). Um snippet com `base_url="/api/v1"` quebrou no primeiro `python`, e o curl de modelo apontava para `/deploys/{id}/chat` — rota de gerenciamento que recusa API key com 403.

@@ -129,6 +129,9 @@
           <div class="chat-input-row">
             <textarea id="chatInput" class="input play-input" rows="2" placeholder="Type a message…"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}" disabled></textarea>
+            <label class="nothink" title="Ask the model to skip its reasoning: faster, worse at maths">
+              <input type="checkbox" id="chatNoThink"> Fast
+            </label>
             <button class="btn btn-primary" id="chatSend" onclick="sendChat()" disabled>Send</button>
             <button class="btn btn-danger play-stop hidden" id="chatStop" onclick="stopChat()">Stop</button>
           </div>
@@ -405,6 +408,9 @@
             </div>
             <textarea id="playInput" class="input play-input" rows="2" placeholder="Type a message…"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendPlay()}" disabled></textarea>
+            <label class="nothink" title="Ask the model to skip its reasoning: faster, worse at maths">
+              <input type="checkbox" id="playNoThink"> Fast
+            </label>
             <button class="btn btn-primary" id="playSend" onclick="sendPlay()" disabled>Send</button>
             <button class="btn btn-danger play-stop hidden" id="playStop" onclick="stopPlay()">Stop</button>
           </div>
