@@ -42,6 +42,13 @@
       </div>
     </div>
 
+    <div class="stats-strip">
+      <div><b>1</b><span>command to install</span></div>
+      <div><b>0</b><span>bytes of your prompts leaving</span></div>
+      <div><b>4</b><span>Python packages, all pinned</span></div>
+      <div><b>MIT</b><span>the whole app, on GitHub</span></div>
+    </div>
+
     <div class="landing-section" id="code">
       <h2>Your code does not change</h2>
       <p class="landing-sub">It speaks the OpenAI API. Point it at your own machine and
@@ -76,50 +83,106 @@ client.chat.completions.create(
         already send. <a href="/docs.html#api">See the API docs &rarr;</a></p>
     </div>
 
-    <div class="hero-shot">
-      <img src="screenshots/02-dashboard.png" alt="SursumAI dashboard showing model deployments and metrics" loading="lazy" />
+    <div class="hero-diagram">
+      <svg viewBox="0 0 900 300" role="img" aria-label="Your app talks to one URL; SursumAI runs the models on your own machines">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g class="dg-edge" marker-end="url(#arrow)">
+          <path d="M196 90 H330"/>
+          <path d="M196 150 H330"/>
+          <path d="M196 210 H330"/>
+          <path d="M570 150 H700"/>
+          <path d="M570 150 C 640 150, 650 70, 700 70"/>
+          <path d="M570 150 C 640 150, 650 230, 700 230"/>
+        </g>
+
+        <g class="dg-box dg-muted">
+          <rect x="20" y="62" width="176" height="56" rx="12"/>
+          <text x="108" y="95">Your app</text>
+          <rect x="20" y="122" width="176" height="56" rx="12"/>
+          <text x="108" y="155">Scripts, agents</text>
+          <rect x="20" y="182" width="176" height="56" rx="12"/>
+          <text x="108" y="215">Your team</text>
+        </g>
+
+        <g class="dg-box dg-main">
+          <rect x="330" y="62" width="240" height="176" rx="16"/>
+          <text x="450" y="104" class="dg-title">SursumAI</text>
+          <text x="450" y="134" class="dg-url">localhost:8001/v1</text>
+          <text x="450" y="170">one key &middot; OpenAI API</text>
+          <text x="450" y="196">router &middot; metrics &middot; logs</text>
+        </g>
+
+        <g class="dg-box dg-soft">
+          <rect x="700" y="42" width="180" height="56" rx="12"/>
+          <text x="790" y="75">This machine</text>
+          <rect x="700" y="122" width="180" height="56" rx="12"/>
+          <text x="790" y="155">Your GPU server</text>
+          <rect x="700" y="202" width="180" height="56" rx="12"/>
+          <text x="790" y="235">A rented GPU</text>
+        </g>
+
+        <text x="635" y="128" class="dg-note">SSH tunnel</text>
+      </svg>
+      <p class="hero-diagram-note">Nothing you send leaves your machines. Swap the GPU,
+        add another one, and the URL your code calls stays the same.</p>
     </div>
 
-    <div class="landing-section">
-      <h2>Deploy in one click</h2>
-      <p class="landing-sub">Pick a model, click Deploy, and get a link any OpenAI-compatible app can use. The platform decides the runtime, ports and GPU for you.</p>
-      <div class="feature-grid">
-        <div class="feature">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 7.4l-5.2 5.2c-.3.3-.8.3-1.1 0l-2.9-2.9a.75.75 0 1 1 1.1-1.1l2.3 2.3 4.6-4.6a.75.75 0 0 1 1.2 1.1z" fill="currentColor"/></svg>
-          <h3>One command setup</h3>
-          <p>One line in the terminal and it is running. The Python environment, the llama.cpp binary and the GPU setup come with it, hidden.</p>
-        </div>
-        <div class="feature">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm1-13h-2v6l5.2 3.1 1-1.7-4.2-2.5z" fill="currentColor"/></svg>
-          <h3>GPU detected for you</h3>
-          <p>NVIDIA GPU with Docker runs vLLM; a GPU without it runs llama.cpp on CUDA; anything else runs on the CPU. It also sizes the model to the VRAM you have, and lets you pick the GGUF quantization by name.</p>
-        </div>
-        <div class="feature">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C7 2 3 6 3 11c0 3.3 1.8 5.9 4.5 7.3V22h9v-3.7C19.2 16.9 21 14.3 21 11c0-5-4-9-9-9zm3.5 11.5l-5 3-.5-4.7 3-3-4.3.4L6 12.6 4.6 10l4-2.5 1.4.6.9-3.4 4.4.4 1.3 1.4-.9 2.4 1.4 1.5z" fill="currentColor"/></svg>
-          <h3>Router across models</h3>
-          <p>Create a pool of 2+ models and the router picks the best one per message. Judge escalation, rule-based routing and round-robin included.</p>
-        </div>
+    <div class="landing-section step-section">
+      <div class="step-copy">
+        <span class="step-num-lg">01</span>
+        <h2>Deploy without knowing any of it</h2>
+        <p>Pick a model, press Deploy. It finds your GPU, picks vLLM or llama.cpp, sizes
+          the model to your VRAM, allocates a port and locks the model's own key. Every
+          one of those is a decision you would otherwise take alone, at 2am.</p>
+        <a class="btn btn-ghost" href="/docs.html#start">Quick start &rarr;</a>
+      </div>
+      <div class="step-shot">
+        <img src="screenshots/02-dashboard.png" alt="The dashboard listing deployments with their status" loading="lazy" />
       </div>
     </div>
 
-    <div class="landing-section">
-      <h2>How it works</h2>
-      <div class="steps">
-        <div class="step">
-          <span class="step-num">1</span>
-          <h3>Create your account</h3>
-          <p>Email and password, stored locally in your machine.</p>
-        </div>
-        <div class="step">
-          <span class="step-num">2</span>
-          <h3>Pick a model</h3>
-          <p>Qwen, DeepSeek, Mistral, Muse-Glimmer or Bonsai from the catalog &mdash; or paste any Hugging Face model, down to the exact GGUF file.</p>
-        </div>
-        <div class="step">
-          <span class="step-num">3</span>
-          <h3>Deploy and use</h3>
-          <p>Your deployment gets a URL and ready-made Python, JS and curl snippets.</p>
-        </div>
+    <div class="landing-section step-section step-flip">
+      <div class="step-copy">
+        <span class="step-num-lg">02</span>
+        <h2>Watch it like a service, not a script</h2>
+        <p>Tokens per second, memory, requests, the model's own logs. When something
+          dies, the card says what happened in a sentence and what to press — the
+          traceback stays in Logs for when you want it.</p>
+        <a class="btn btn-ghost" href="/docs.html#trouble">When something breaks &rarr;</a>
+      </div>
+      <div class="step-shot">
+        <img src="screenshots/03-detail-metrics.png" alt="Live metrics for a running model" loading="lazy" />
+      </div>
+    </div>
+
+    <div class="landing-section step-section">
+      <div class="step-copy">
+        <span class="step-num-lg">03</span>
+        <h2>Try it before your code does</h2>
+        <p>A playground against the real endpoint, images included for vision models.
+          The reasoning is folded away, the answer is not — and the tag tells you which
+          model in the pool served it.</p>
+        <a class="btn btn-ghost" href="/docs.html#thinking">Reasoning models &rarr;</a>
+      </div>
+      <div class="step-shot">
+        <img src="screenshots/04-playground.png" alt="The playground chatting with a deployed model" loading="lazy" />
+      </div>
+    </div>
+
+    <div class="landing-section step-section step-flip">
+      <div class="step-copy">
+        <span class="step-num-lg">04</span>
+        <h2>Copy the snippet, not the concept</h2>
+        <p>Python, JavaScript and curl, filled in with your URL, your key and the model
+          you just deployed. Paste and it runs.</p>
+        <a class="btn btn-ghost" href="/docs.html#api">API docs &rarr;</a>
+      </div>
+      <div class="step-shot">
+        <img src="screenshots/07-code.png" alt="Ready-made code snippets for the deployed model" loading="lazy" />
       </div>
     </div>
 

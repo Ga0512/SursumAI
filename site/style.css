@@ -1226,3 +1226,40 @@ a.btn { text-decoration: none; }
 .faq dt { font-weight: 600; color: var(--ink); font-size: 0.95rem; margin-bottom: 4px; }
 .faq dd { margin: 0 0 var(--s3); color: var(--text-soft); font-size: 0.875rem; line-height: 1.6; }
 @media (max-width: 860px) { .faq { grid-template-columns: 1fr; } }
+
+/* the shape of the thing, in one look */
+.hero-diagram { max-width: 900px; margin: var(--s6) auto var(--s4); }
+.hero-diagram svg { width: 100%; height: auto; color: var(--border-strong, #c9d1dc); }
+.dg-edge path { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.dg-box rect { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
+.dg-box text { font-family: inherit; font-size: 14px; fill: var(--text-soft); text-anchor: middle; }
+.dg-main rect { fill: var(--accent-soft, rgba(99, 91, 255, 0.06)); stroke: var(--accent); }
+.dg-main .dg-title { font-size: 19px; font-weight: 700; fill: var(--ink); }
+.dg-main .dg-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; fill: var(--accent); }
+.dg-note { font-size: 12px; fill: var(--text-muted); text-anchor: middle; }
+.hero-diagram-note { margin-top: var(--s3); text-align: center; font-size: 0.875rem;
+  color: var(--text-muted); max-width: 60ch; margin-left: auto; margin-right: auto; }
+
+/* numbered sections: the words on one side, the product on the other */
+.step-section { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: var(--s6); align-items: center; }
+.step-flip .step-copy { order: 2; }
+.step-copy h2 { margin: 6px 0 var(--s3); }
+.step-copy p { color: var(--text-soft); font-size: 0.95rem; line-height: 1.65; margin-bottom: var(--s3); }
+.step-num-lg { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem;
+  font-weight: 700; color: var(--accent); letter-spacing: 0.08em; }
+.step-shot img { width: 100%; border: 1px solid var(--border); border-radius: var(--r-md, 12px);
+  box-shadow: var(--shadow-md, 0 12px 32px rgba(10, 37, 64, 0.1)); display: block; }
+@media (max-width: 860px) {
+  .step-section { grid-template-columns: 1fr; gap: var(--s4); }
+  .step-flip .step-copy { order: 0; }
+}
+
+/* four things that are true about us, said in four words each */
+.stats-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3);
+  max-width: 860px; margin: var(--s6) auto 0; padding: var(--s5) 0;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stats-strip div { text-align: center; }
+.stats-strip b { display: block; font-size: 1.6rem; letter-spacing: -0.02em; color: var(--ink); }
+.stats-strip span { font-size: 0.78rem; color: var(--text-muted); }
+@media (max-width: 860px) { .stats-strip { grid-template-columns: repeat(2, 1fr); gap: var(--s4); } }
