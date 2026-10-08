@@ -1263,3 +1263,11 @@ a.btn { text-decoration: none; }
 .stats-strip b { display: block; font-size: 1.6rem; letter-spacing: -0.02em; color: var(--ink); }
 .stats-strip span { font-size: 0.78rem; color: var(--text-muted); }
 @media (max-width: 860px) { .stats-strip { grid-template-columns: repeat(2, 1fr); gap: var(--s4); } }
+
+/* two cards, not four: each one gets room to be read */
+#numbers .numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 760px; margin: 0 auto; }
+#numbers .number b { font-size: 2.4rem; }
+
+/* air between sections — a page that breathes is a page people stay on */
+.landing-section { padding-top: var(--s7); padding-bottom: var(--s7); }
+.step-section + .step-section { padding-top: var(--s6); }
