@@ -32,15 +32,18 @@
         Swap <code>api.openai.com</code> for <code>localhost</code>.<br />
         One command. Your hardware, your data, no bill per token.
       </p>
-      <div class="install-box hero-install">
-        <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
-        <button class="btn install-copy" onclick="copyInstall()">Copy</button>
+      <div class="term" data-copy="curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash">
+        <div class="term-bar">
+          <span class="term-dots"><i></i><i></i><i></i></span>
+          <span class="term-name">bash</span>
+          <button class="term-copy" onclick="copyInstall(this)" aria-label="Copy the install command">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9V5.5A1.5 1.5 0 0 1 10.5 4h8A1.5 1.5 0 0 1 20 5.5v8a1.5 1.5 0 0 1-1.5 1.5H15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="9" width="11" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="term-body"><span class="term-prompt">$</span> <span class="term-cmd">curl</span> <span class="term-flag">-fsSL</span> <span class="term-url">https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh</span> <span class="term-pipe">|</span> <span class="term-cmd">bash</span></pre>
       </div>
-      <div class="actions">
-        <a class="btn btn-primary" href="/docs.html">Read the docs</a>
-        <a class="btn" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">View on GitHub</a>
       </div>
-    </div>
 
     <div class="stats-strip">
       <div><b>1</b><span>command to install</span></div>
@@ -322,9 +325,16 @@ client.chat.completions.create(
       <span class="eyebrow">Get started</span>
       <h2>Install in one command</h2>
       <p class="landing-sub">Runs on Linux, macOS and WSL (Windows &mdash; open Ubuntu, not PowerShell). No Docker, Python or GPU knowledge needed. The same command installs Free and Pro.</p>
-      <div class="install-box">
-        <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
-        <button class="btn install-copy" onclick="copyInstall()">Copy</button>
+      <div class="term" data-copy="curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash">
+        <div class="term-bar">
+          <span class="term-dots"><i></i><i></i><i></i></span>
+          <span class="term-name">bash</span>
+          <button class="term-copy" onclick="copyInstall(this)" aria-label="Copy the install command">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9V5.5A1.5 1.5 0 0 1 10.5 4h8A1.5 1.5 0 0 1 20 5.5v8a1.5 1.5 0 0 1-1.5 1.5H15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="9" width="11" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="term-body"><span class="term-prompt">$</span> <span class="term-cmd">curl</span> <span class="term-flag">-fsSL</span> <span class="term-url">https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh</span> <span class="term-pipe">|</span> <span class="term-cmd">bash</span></pre>
       </div>
       <p class="install-note"><a href="/docs.html">Read the docs</a> &middot; Run <code>sursumai</code> and it opens <code>http://localhost:3000</code> &mdash; create your account there and deploy your first model. <code>sursumai update</code> upgrades it, <code>sursumai uninstall</code> removes it.</p>
     </div>

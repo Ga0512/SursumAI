@@ -1286,7 +1286,7 @@ a.btn { text-decoration: none; }
 .landing-section > .eyebrow { text-align: center; }
 
 /* cards float on the grid instead of being boxed in by it */
-.number, .plan, .versus-col, .step-shot img, .install-box {
+.number, .plan, .versus-col, .step-shot img {
   background: var(--surface);
   box-shadow: 0 1px 2px rgba(10, 37, 64, 0.04), 0 12px 32px rgba(10, 37, 64, 0.05);
 }
@@ -1304,3 +1304,39 @@ a.btn { text-decoration: none; }
   .step-shot img { transition: none; }
   .step-shot img:hover { transform: none; }
 }
+
+/* ==========================================================================
+   The install command, as a terminal
+   ========================================================================== */
+.term { max-width: 720px; margin: var(--s5) auto var(--s3); text-align: left;
+  background: var(--ink-panel, #0d1b2a); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 2px 6px rgba(10, 37, 64, 0.12), 0 24px 56px rgba(10, 37, 64, 0.22); }
+.term-bar { display: flex; align-items: center; gap: var(--s3);
+  padding: 10px 12px 10px 14px; background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.term-dots { display: flex; gap: 6px; }
+.term-dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+.term-dots i:first-child { background: #ff5f57; }
+.term-dots i:nth-child(2) { background: #febc2e; }
+.term-dots i:nth-child(3) { background: #28c840; }
+.term-name { flex: 1; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.term-copy { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font: 600 0.78rem inherit; color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px; padding: 5px 10px; transition: background 0.15s ease, color 0.15s ease; }
+.term-copy:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.term-copy svg { width: 14px; height: 14px; }
+.term-copy.copied { background: rgba(40, 200, 64, 0.18); border-color: rgba(40, 200, 64, 0.45); color: #7ee89a; }
+
+.term-body { margin: 0; padding: var(--s4) var(--s4) calc(var(--s4) + 2px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem;
+  line-height: 1.6; color: rgba(255, 255, 255, 0.82); overflow-x: auto; white-space: nowrap; }
+.term-prompt { color: rgba(255, 255, 255, 0.3); user-select: none; margin-right: 4px; }
+.term-cmd { color: #8ef0a6; font-weight: 600; }
+.term-flag { color: rgba(255, 255, 255, 0.45); }
+.term-url { color: #9db8ff; }
+.term-pipe { color: #ffd479; }
+
+@media (max-width: 560px) { .term-body { font-size: 0.76rem; } }

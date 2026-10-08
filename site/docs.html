@@ -246,10 +246,17 @@ sursumai uninstall    # remove it from this computer</code></pre>
 
         <div class="docs-cta">
           <h2>Install it</h2>
-          <div class="install-box">
-            <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
-            <button class="btn install-copy" onclick="copyInstall()">Copy</button>
-          </div>
+          <div class="term" data-copy="curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash">
+        <div class="term-bar">
+          <span class="term-dots"><i></i><i></i><i></i></span>
+          <span class="term-name">bash</span>
+          <button class="term-copy" onclick="copyInstall(this)" aria-label="Copy the install command">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9V5.5A1.5 1.5 0 0 1 10.5 4h8A1.5 1.5 0 0 1 20 5.5v8a1.5 1.5 0 0 1-1.5 1.5H15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="9" width="11" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="term-body"><span class="term-prompt">$</span> <span class="term-cmd">curl</span> <span class="term-flag">-fsSL</span> <span class="term-url">https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh</span> <span class="term-pipe">|</span> <span class="term-cmd">bash</span></pre>
+      </div>
           <p class="install-note">Something missing here?
             <a href="https://github.com/Ga0512/SursumAI/issues" target="_blank" rel="noopener">Open an issue</a> —
             the docs are part of the repository.</p>

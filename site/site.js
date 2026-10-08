@@ -2,26 +2,41 @@
 // release.sh keeps the tag here in step with install.sh and the README.
 const INSTALL_CMD = "curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash";
 
-function copyInstall() {
-  const btn = document.querySelector(".install-copy");
+function copyInstall(button) {
+  const term = button ? button.closest(".term") : document.querySelector(".term");
+  const text = (term && term.dataset.copy) || INSTALL_CMD;
+  const label = button ? button.querySelector("span") : null;
+
   const done = () => {
-    if (btn) btn.textContent = "Copied!";
-    setTimeout(() => { if (btn) btn.textContent = "Copy"; }, 2000);
+    if (!button) return;
+    button.classList.add("copied");
+    if (label) label.textContent = "Copied";
+    setTimeout(() => {
+      button.classList.remove("copied");
+      if (label) label.textContent = "Copy";
+    }, 1800);
   };
+
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(INSTALL_CMD).then(done).catch(() => fallbackCopy(done));
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
   } else {
-    fallbackCopy(done);
+    fallbackCopy(text, done);
   }
 }
 
-function fallbackCopy(done) {
+function fallbackCopy(text, done) {
+  // older browsers, and any page served over plain http, where the clipboard
+  // API is not available at all
   const ta = document.createElement("textarea");
-  ta.value = INSTALL_CMD;
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
   document.body.appendChild(ta);
   ta.select();
-  try { document.execCommand("copy"); done(); } catch {}
+  try { document.execCommand("copy"); } catch { /* nothing else to try */ }
   document.body.removeChild(ta);
+  done();
 }
 
 /* The hero types through the models SursumAI can run, with each model's logo.
