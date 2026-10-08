@@ -15,7 +15,8 @@
     <nav class="nav">
       <span class="logo"><svg class="logo-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><rect width="800" height="800" fill="#070228"/><g fill="#fff"><rect x="208" y="130" width="404" height="105" rx="36"/><rect x="208" y="130" width="118" height="238" rx="36"/><rect x="340" y="368" width="120" height="105" rx="22"/><rect x="496" y="474" width="118" height="238" rx="36"/><rect x="208" y="606" width="406" height="106" rx="36"/></g></svg>SursumAI</span>
       <div class="site-links">
-        <a class="btn btn-ghost" href="#benchmark">Benchmark</a>
+        <a class="btn btn-ghost" href="/docs.html">Docs</a>
+        <a class="btn btn-ghost" href="#numbers">Numbers</a>
         <a class="btn btn-ghost" href="#why">Why</a>
         <a class="btn btn-ghost" href="#pricing">Pricing</a>
         <a class="btn btn-ghost" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
@@ -31,10 +32,48 @@
         Swap <code>api.openai.com</code> for <code>localhost</code>.<br />
         One command. Your hardware, your data, no bill per token.
       </p>
+      <div class="install-box hero-install">
+        <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
+        <button class="btn install-copy" onclick="copyInstall()">Copy</button>
+      </div>
       <div class="actions">
-        <a class="btn btn-primary" href="#install">Install free</a>
+        <a class="btn btn-primary" href="/docs.html">Read the docs</a>
         <a class="btn" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">View on GitHub</a>
       </div>
+    </div>
+
+    <div class="landing-section" id="code">
+      <h2>Your code does not change</h2>
+      <p class="landing-sub">It speaks the OpenAI API. Point it at your own machine and
+        carry on.</p>
+      <div class="code-compare">
+        <div class="code-col">
+          <div class="code-head">Before</div>
+          <pre><code>client = OpenAI(
+    base_url=<span class="was">"https://api.openai.com/v1"</span>,
+    api_key=<span class="was">"sk-proj-..."</span>,
+)
+
+client.chat.completions.create(
+    model=<span class="was">"gpt-4o-mini"</span>,
+    messages=[...],
+)</code></pre>
+        </div>
+        <div class="code-col code-col-now">
+          <div class="code-head">After</div>
+          <pre><code>client = OpenAI(
+    base_url=<span class="now">"http://localhost:8001/v1"</span>,
+    api_key=<span class="now">"sk-sursum-..."</span>,
+)
+
+client.chat.completions.create(
+    model=<span class="now">"Qwen/Qwen3-8B-GGUF"</span>,
+    messages=[...],
+)</code></pre>
+        </div>
+      </div>
+      <p class="code-note">Streaming, JSON schema, vision, tools — the same fields you
+        already send. <a href="/docs.html#api">See the API docs &rarr;</a></p>
     </div>
 
     <div class="hero-shot">
@@ -121,6 +160,36 @@
       </div>
     </div>
 
+    <div class="landing-section" id="numbers">
+      <h2>Numbers, and where they came from</h2>
+      <p class="landing-sub">Measured on rented GPUs while building this. No vendor
+        slides — the method is in the repository and you can re-run it.</p>
+      <div class="numbers">
+        <div class="number">
+          <b>4.7s</b>
+          <span>to pull six fields out of a 25 000-character document
+            (Qwen3.8 27B, RTX 6000 Ada, thinking off, JSON schema)</span>
+        </div>
+        <div class="number">
+          <b>1.9s</b>
+          <span>per document with four running at once — a GPU reads the model once
+            and serves the whole batch</span>
+        </div>
+        <div class="number">
+          <b>5.9x</b>
+          <span>less output after turning reasoning off on the deployment:
+            1175 tokens and 26.1s became 176 tokens and 4.5s, same answer</span>
+        </div>
+        <div class="number">
+          <b>45 tok/s</b>
+          <span>on a 27B at Q4. The arithmetic that predicts it:
+            bandwidth &divide; model size &times; 0.7 — it held on three different cards</span>
+        </div>
+      </div>
+      <p class="bench-caveat">Every one of these is reproducible: the model, the card
+        and the settings are named in <a href="/docs.html">the docs</a>.</p>
+    </div>
+
     <div class="landing-section" id="benchmark">
       <h2>Does the router actually work?</h2>
       <p class="landing-sub">We measured it: 100 GSM8K maths problems on a single 6&nbsp;GB NVIDIA GPU, every answer checked against the right number &mdash; no LLM grading another.</p>
@@ -149,6 +218,29 @@
         </div>
       </div>
       <p class="bench-caveat">The router pays when the strong model is far more expensive than the cheap one; with a 0.6B&nbsp;+&nbsp;1.7B pool it saved nothing. Times assume every model stays loaded. <a href="https://github.com/Ga0512/SursumAI/tree/main/bench" target="_blank" rel="noopener">Method, raw data and what didn&rsquo;t work &rarr;</a></p>
+    </div>
+
+    <div class="landing-section" id="uses">
+      <h2>What people run on it</h2>
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>Documents that cannot leave</h3>
+          <p>Case files, medical records, contracts. A schema in, clean JSON out, and the
+            text never reaches anyone else's server. <a href="/docs.html#json">JSON output &rarr;</a></p>
+        </div>
+        <div class="feature">
+          <h3>An internal assistant</h3>
+          <p>One URL and one API key for your whole team, with the models you chose.
+            Several people at once cost the GPU almost nothing extra.
+            <a href="/docs.html#batch">How batching works &rarr;</a></p>
+        </div>
+        <div class="feature">
+          <h3>A pipeline that got expensive</h3>
+          <p>Classification, extraction, summaries by the thousand. The small model takes
+            what it can and the big one is woken only when needed.
+            <a href="/docs.html#router">Routing &rarr;</a></p>
+        </div>
+      </div>
     </div>
 
     <div class="landing-section" id="why">
@@ -223,6 +315,38 @@
       <p class="bench-caveat">No per-user or per-token pricing: your models run on your hardware, and your prompts never pass through us.</p>
     </div>
 
+    <div class="landing-section" id="faq">
+      <h2>Questions people ask first</h2>
+      <dl class="faq">
+        <dt>Does my data really stay here?</dt>
+        <dd>Yes. The models run on hardware you control and the prompts never reach us.
+          The only thing our servers know is whether an account subscribes — the free
+          edition does not talk to us at all.</dd>
+
+        <dt>What do I need to run it?</dt>
+        <dd>Any Linux, macOS or Windows with WSL. An NVIDIA GPU makes it fast; without
+          one it still runs on the CPU, slower. The installer brings everything else.</dd>
+
+        <dt>Which models?</dt>
+        <dd>Anything on Hugging Face: Qwen, DeepSeek, Mistral, Llama, your own
+          fine-tune. GGUF on llama.cpp, safetensors on vLLM, and it picks the runtime
+          for you.</dd>
+
+        <dt>How fast will it be on my machine?</dt>
+        <dd>Divide your GPU's memory bandwidth by the size of the model file and take
+          70 %. That predicted all three cards we measured within 10 %.</dd>
+
+        <dt>Is it really open source?</dt>
+        <dd>MIT, the whole app. Pro is a subscription that unlocks running models on your
+          other servers over SSH; everything else is free forever and always will be.</dd>
+
+        <dt>What happens if you disappear?</dt>
+        <dd>Nothing stops. The app is on your machine and the code is on GitHub. Even
+          Pro keeps working for 30 days offline, because the answer about your account
+          is signed and dated.</dd>
+      </dl>
+    </div>
+
     <div class="landing-install" id="install">
       <h2>Install in one command</h2>
       <p class="landing-sub">Runs on Linux, macOS and WSL (Windows &mdash; open Ubuntu, not PowerShell). No Docker, Python or GPU knowledge needed. The same command installs Free and Pro.</p>
@@ -230,7 +354,7 @@
         <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
         <button class="btn install-copy" onclick="copyInstall()">Copy</button>
       </div>
-      <p class="install-note">Run <code>sursumai</code> and it opens <code>http://localhost:3000</code> &mdash; create your account there and deploy your first model. <code>sursumai update</code> upgrades it, <code>sursumai uninstall</code> removes it.</p>
+      <p class="install-note"><a href="/docs.html">Read the docs</a> &middot; Run <code>sursumai</code> and it opens <code>http://localhost:3000</code> &mdash; create your account there and deploy your first model. <code>sursumai update</code> upgrades it, <code>sursumai uninstall</code> removes it.</p>
     </div>
 
     <div class="landing-cta">
@@ -242,8 +366,12 @@
 
   <footer class="site-foot">
     <span>SursumAI &middot; MIT licensed</span>
+    <a href="/docs.html">Docs</a>
     <a href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Ga0512/SursumAI/releases" target="_blank" rel="noopener">Releases</a>
     <a href="https://github.com/Ga0512/SursumAI/tree/main/bench" target="_blank" rel="noopener">Benchmark method</a>
+    <a href="https://github.com/Ga0512/SursumAI/issues" target="_blank" rel="noopener">Support</a>
+    <a href="https://app.sursumai.com">Account</a>
   </footer>
 
   <script src="site.js"></script>

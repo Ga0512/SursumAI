@@ -1164,3 +1164,65 @@ a.btn { text-decoration: none; }
 .versus-new li::before { content: "✓"; position: absolute; left: 2px; color: var(--accent); font-weight: 700; }
 .versus-note { margin-top: var(--s4); font-size: 0.9rem; color: var(--text-muted); text-align: center; }
 @media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
+
+/* ==========================================================================
+   Docs
+   ========================================================================== */
+.docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--s6);
+  max-width: 1100px; margin: 0 auto; padding: var(--s6) var(--s4) var(--s7); }
+.docs-nav { position: sticky; top: var(--s4); align-self: start; display: grid; gap: 2px; }
+.docs-nav a { font-size: 0.85rem; color: var(--text-muted); text-decoration: none;
+  padding: 6px 10px; border-radius: var(--r-sm); border-left: 2px solid transparent; }
+.docs-nav a:hover { color: var(--ink); background: var(--surface-sunken); }
+.docs-body { min-width: 0; }
+.docs-body h1 { font-size: 2rem; letter-spacing: -0.02em; margin-bottom: var(--s2); }
+.docs-lead { color: var(--text-soft); margin-bottom: var(--s6); max-width: 62ch; }
+.docs-body h2 { font-size: 1.15rem; margin: var(--s7) 0 var(--s3); scroll-margin-top: 20px; }
+.docs-body p { color: var(--text-soft); margin-bottom: var(--s3); max-width: 70ch; line-height: 1.65; }
+.docs-body pre { background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px); padding: var(--s4); overflow-x: auto; margin-bottom: var(--s4); }
+.docs-body code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
+.docs-body p code, .docs-faq code { background: var(--surface-sunken); padding: 1px 6px;
+  border-radius: 5px; }
+.docs-table { width: 100%; border-collapse: collapse; margin-bottom: var(--s4); font-size: 0.88rem; }
+.docs-table th { text-align: left; font-weight: 600; color: var(--ink);
+  border-bottom: 1px solid var(--border); padding: 8px 10px 8px 0; }
+.docs-table td { padding: 8px 10px 8px 0; color: var(--text-soft);
+  border-bottom: 1px solid var(--border); }
+.docs-faq dt { font-weight: 600; color: var(--ink); margin-top: var(--s4); font-size: 0.93rem; }
+.docs-faq dd { margin: 6px 0 0; color: var(--text-soft); font-size: 0.9rem; max-width: 70ch; }
+.docs-cta { margin-top: var(--s7); padding-top: var(--s6); border-top: 1px solid var(--border); }
+@media (max-width: 860px) {
+  .docs { grid-template-columns: 1fr; gap: var(--s4); }
+  .docs-nav { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+}
+
+/* the before/after that shows nothing changes in your code */
+.code-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
+.code-col { border: 1px solid var(--border); border-radius: var(--r-md, 12px); overflow: hidden; }
+.code-col-now { border-color: var(--accent); }
+.code-head { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-muted); padding: 10px var(--s4); border-bottom: 1px solid var(--border); }
+.code-col-now .code-head { color: var(--accent); }
+.code-col pre { margin: 0; padding: var(--s4); overflow-x: auto; background: var(--surface-sunken); }
+.code-col code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.7; }
+.code-col .was { color: var(--text-muted); text-decoration: line-through; }
+.code-col .now { color: var(--accent); font-weight: 600; }
+.code-note { margin-top: var(--s3); font-size: 0.875rem; color: var(--text-muted); text-align: center; }
+
+/* measured numbers, with what they were measured on */
+.numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
+.number { border: 1px solid var(--border); border-radius: var(--r-md, 12px); padding: var(--s5); }
+.number b { display: block; font-size: 1.9rem; letter-spacing: -0.02em; color: var(--accent); margin-bottom: 6px; }
+.number span { font-size: 0.875rem; color: var(--text-soft); line-height: 1.55; }
+.hero-install { margin: var(--s5) auto var(--s3); max-width: 680px; }
+
+@media (max-width: 860px) {
+  .code-compare, .numbers { grid-template-columns: 1fr; }
+}
+
+/* FAQ: two columns of plain questions */
+.faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3) var(--s5); }
+.faq dt { font-weight: 600; color: var(--ink); font-size: 0.95rem; margin-bottom: 4px; }
+.faq dd { margin: 0 0 var(--s3); color: var(--text-soft); font-size: 0.875rem; line-height: 1.6; }
+@media (max-width: 860px) { .faq { grid-template-columns: 1fr; } }

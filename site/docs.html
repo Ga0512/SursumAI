@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SursumAI docs — install, API, tuning</title>
+  <meta name="description" content="How to install SursumAI, call it from your code with the OpenAI SDK, tune a deployment, and run models on your own servers over SSH." />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <main id="landing">
+    <nav class="nav">
+      <a class="logo" href="/"><svg class="logo-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><rect width="800" height="800" fill="#070228"/><g fill="#fff"><rect x="208" y="130" width="404" height="105" rx="36"/><rect x="208" y="130" width="118" height="238" rx="36"/><rect x="340" y="368" width="120" height="105" rx="22"/><rect x="496" y="474" width="118" height="238" rx="36"/><rect x="208" y="606" width="406" height="106" rx="36"/></g></svg>SursumAI</a>
+      <div class="site-links">
+        <a class="btn btn-ghost" href="/#pricing">Pricing</a>
+        <a class="btn btn-ghost" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn-primary" href="/#install">Install</a>
+      </div>
+    </nav>
+
+    <div class="docs">
+      <aside class="docs-nav">
+        <a href="#start">Quick start</a>
+        <a href="#api">Calling the API</a>
+        <a href="#models">Choosing a model</a>
+        <a href="#json">JSON output</a>
+        <a href="#thinking">Reasoning models</a>
+        <a href="#batch">Many documents at once</a>
+        <a href="#router">Routing between models</a>
+        <a href="#machines">Your own servers (Pro)</a>
+        <a href="#service">Running it as a service</a>
+        <a href="#cli">Command line</a>
+        <a href="#trouble">When something breaks</a>
+      </aside>
+
+      <article class="docs-body">
+        <h1>Documentation</h1>
+        <p class="docs-lead">Everything here was run on real hardware. Where there is a
+          number, it was measured, and the machine it came from is named.</p>
+
+        <h2 id="start">Quick start</h2>
+        <p>One command. It brings its own Python, the llama.cpp binary and the GPU
+          setup — nothing to install first. On Windows, run it inside WSL (Ubuntu),
+          not PowerShell.</p>
+        <pre><code>curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash
+sursumai</code></pre>
+        <p>The dashboard opens at <code>http://localhost:3000</code>. Create an account
+          there — it is local, stored on your machine — then <b>New deployment</b>, pick
+          a model, and <b>Deploy</b>. The first one takes a few minutes while the weights
+          come down.</p>
+
+        <h2 id="api">Calling the API</h2>
+        <p>It speaks the OpenAI API. Point your existing code at your own machine and
+          change nothing else.</p>
+        <pre><code>from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8001/v1",
+    api_key="sk-sursum-...",          # API keys tab in the dashboard
+)
+
+r = client.chat.completions.create(
+    model="Qwen/Qwen3-8B-GGUF",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(r.choices[0].message.content)</code></pre>
+        <p>Or with curl:</p>
+        <pre><code>curl http://localhost:8001/v1/chat/completions \
+  -H "Authorization: Bearer sk-sursum-..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "Qwen/Qwen3-8B-GGUF",
+       "messages": [{"role": "user", "content": "Hello"}]}'</code></pre>
+        <p>One key works for every model and pool in your account, the same way an
+          OpenAI key does. <code>GET /v1/models</code> lists what you have running.</p>
+
+        <h2 id="models">Choosing a model</h2>
+        <p>Paste any Hugging Face repository, or the link to one GGUF file. The
+          dashboard reads the repository and lists the quantizations with their sizes;
+          from the API, name the file with a colon:</p>
+        <pre><code>"model": "unsloth/Qwen3.8-27B-GGUF:Q4_K_S"</code></pre>
+        <p>Rule of thumb for speed, and it is just division:</p>
+        <pre><code>tokens/s ≈ GPU memory bandwidth ÷ model file size × 0.7</code></pre>
+        <p>Measured, same 27B model at Q4 (16 GB), same prompt:</p>
+        <table class="docs-table">
+          <thead><tr><th>GPU</th><th>Bandwidth</th><th>Tokens/s</th></tr></thead>
+          <tbody>
+            <tr><td>NVIDIA A40</td><td>696 GB/s</td><td>30</td></tr>
+            <tr><td>RTX PRO 4500 SE</td><td>800 GB/s</td><td>37</td></tr>
+            <tr><td>RTX 6000 Ada</td><td>960 GB/s</td><td>45</td></tr>
+          </tbody>
+        </table>
+        <p>Memory size decides what fits; bandwidth decides how fast. A 48 GB card is
+          not faster than a 24 GB one — it just holds more.</p>
+
+        <h2 id="json">JSON output</h2>
+        <p>Give it a schema and the runtime generates only valid JSON. No prose to strip,
+          no half-parsed answers.</p>
+        <pre><code>r = client.chat.completions.create(
+    model="unsloth/Qwen3.8-27B-GGUF",
+    messages=[{"role": "user", "content": "Extract the fields:\n\n" + document}],
+    max_tokens=1500,
+    temperature=0,
+    response_format={"type": "json_schema", "json_schema": {
+        "name": "fields",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "date":    {"type": "string"},
+                "place":   {"type": "string"},
+                "summary": {"type": "string", "maxLength": 200},
+            },
+            "required": ["date", "place", "summary"],
+        },
+    }},
+)</code></pre>
+        <p><code>maxLength</code> is worth setting. The field the model is free to ramble
+          in is usually most of the time spent.</p>
+
+        <h2 id="thinking">Reasoning models</h2>
+        <p>A reasoning model writes its thinking before the answer, and you wait for all
+          of it. On a 27B extracting six fields: <b>1175 tokens and 26.1 s</b> thinking,
+          <b>176 tokens and 4.5 s</b> with thinking off. Same answer.</p>
+        <p>Set it once on the deployment — <b>Advanced options → Tuning → Thinking</b> —
+          and every call to that model gets it, with nothing to remember in your code.
+          A single call can ask for the opposite:</p>
+        <pre><code># this one needs to think
+client.chat.completions.create(
+    model="unsloth/Qwen3.8-27B-GGUF",
+    messages=[...],
+    max_tokens=3000,
+    extra_body={"chat_template_kwargs": {"enable_thinking": True},
+                "reasoning_effort": "low"},     # low | medium | xhigh
+)</code></pre>
+        <p>Measured on the same question: thinking off, 1081 tokens; <code>low</code>,
+          795 tokens and <em>faster</em> than off — a little thinking makes the model
+          organise the answer instead of rambling.</p>
+
+        <h2 id="batch">Many documents at once</h2>
+        <p>Generating for eight requests costs almost what one costs: the GPU reads the
+          model once and serves the whole batch. Measured on an RTX 6000 Ada, 25 000
+          characters per document (~7 000 tokens):</p>
+        <table class="docs-table">
+          <thead><tr><th>At the same time</th><th>Total</th><th>Per document</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>4.7 s</td><td>4.7 s</td></tr>
+            <tr><td>4</td><td>7.8 s</td><td>1.9 s</td></tr>
+            <tr><td>8</td><td>14.0 s</td><td>1.7 s</td></tr>
+          </tbody>
+        </table>
+        <p><b>The one rule:</b> the context is shared between the conversations running
+          at the same time.</p>
+        <pre><code>max_model_len ≥ parallel requests × tokens of your largest document</code></pre>
+        <p>Four 7 000-token documents on a 16 384 context give you
+          <em>"Context size has been exceeded"</em>. Set <b>Max model len</b> to 40 960
+          and <b>Conversations at once</b> to 4 and they fit with room to spare.</p>
+
+        <h2 id="router">Routing between models</h2>
+        <p>A pool is two or more deployments behind one name. Call
+          <code>model="router"</code> and the cheap model answers what it can; the big one
+          is woken when it has to be.</p>
+        <pre><code>client.chat.completions.create(
+    model="router",
+    messages=[...],
+    extra_body={"session_id": "user-42"},   # keeps the routing state per conversation
+)</code></pre>
+        <p>The answer tells you who served it:
+          <code>"model": "mix → Qwen/Qwen3-4B-GGUF (escalated)"</code>.</p>
+        <p>Five modes: <b>escalation</b> (a judge model escalates), <b>classifier</b>
+          (a judge picks one of N), <b>advisor</b> (the judge runs in the background and
+          counts for the next turn), <b>stage</b> (keyword rules, no judge) and
+          <b>round robin</b>. We measured escalation on 100 GSM8K problems: a 0.6B alone
+          got 69 %, the 8B alone 93 %, and the pool 87 % at a third of the time — and a
+          judge smaller than 1.7B was worse than a coin flip, so give the pool a decent
+          judge.</p>
+
+        <h2 id="machines">Your own servers (Pro)</h2>
+        <p>Add a machine by pasting the line your provider shows you — the whole thing,
+          port included:</p>
+        <pre><code>ssh root@203.0.113.7 -p 22133 -i ~/.ssh/id_ed25519</code></pre>
+        <p>SursumAI installs itself there, opens a private SSH tunnel and the models on
+          that machine join your pools and your API. <b>The URL you call does not
+          change</b>: it stays <code>http://localhost:8001/v1</code>, because your
+          machine is the front door and the remote model is never exposed — it listens on
+          <code>127.0.0.1</code> on the server, and the tunnel is the only way in.</p>
+        <p>Before adding one, <code>ssh user@host</code> has to work from the machine
+          running SursumAI, without a password. That means the key of <em>that</em>
+          machine, not your laptop's, if they are different.</p>
+
+        <h2 id="service">Running it as a service</h2>
+        <p>On a server, the ports and the address are yours to choose:</p>
+        <pre><code>SURSUMAI_BIND=0.0.0.0 \
+SURSUMAI_WEB_PORT=80 \
+SURSUMAI_CENTRAL_PORT=8080 \
+sursumai</code></pre>
+        <p>The base URL in the dashboard follows what you chose. A port outside
+          1-65535, two services on the same port, or anything inside 9000-9099 (where
+          deployed models listen) stops the process with a sentence instead of a
+          collision.</p>
+        <p>A common shape: a small always-on box (an EC2 <code>t3.small</code> is enough,
+          it needs no GPU) running SursumAI, and a rented GPU attached over SSH that you
+          turn on and off. The box holds the database, the keys and the URL; the GPU is
+          the muscle.</p>
+
+        <h2 id="cli">Command line</h2>
+        <pre><code>sursumai              # start everything and open the dashboard
+sursumai status       # what is running
+sursumai list         # your deployments
+sursumai deploy Qwen/Qwen3-4B-GGUF
+sursumai chat &lt;id&gt; "hello"
+sursumai logs &lt;id&gt; --follow
+sursumai update       # upgrade to the latest release
+sursumai uninstall    # remove it from this computer</code></pre>
+
+        <h2 id="trouble">When something breaks</h2>
+        <dl class="docs-faq">
+          <dt>"Context size has been exceeded"</dt>
+          <dd>Your parallel requests together need more context than the deployment has.
+            Raise <b>Max model len</b>, or lower <b>Conversations at once</b>.</dd>
+
+          <dt>The card says the model stopped running</dt>
+          <dd>Press <b>Redeploy</b>. If it keeps happening, open <b>Logs</b> — the last
+            lines are the runtime's own words.</dd>
+
+          <dt>"This model was not published quantized that way"</dt>
+          <dd>You asked vLLM for AWQ or GPTQ on a repository that ships full weights.
+            Leave the quantization alone, or pick a repository that was published
+            quantized.</dd>
+
+          <dt>The answer comes back empty</dt>
+          <dd>A reasoning model spent the whole budget thinking. Raise
+            <code>max_tokens</code> to 1500 or more, or turn thinking off on the
+            deployment.</dd>
+
+          <dt>The model is slower than I expected</dt>
+          <dd>Check the arithmetic in <a href="#models">Choosing a model</a>. If it
+            matches, the card is at its ceiling — fewer output tokens or a card with more
+            bandwidth are the only levers.</dd>
+
+          <dt>A machine went offline</dt>
+          <dd>Rented GPUs change address when they restart. Remove the machine and add it
+            again with the new SSH line.</dd>
+        </dl>
+
+        <div class="docs-cta">
+          <h2>Install it</h2>
+          <div class="install-box">
+            <div class="install-cmd">$ curl -fsSL https://github.com/Ga0512/SursumAI/raw/v1.0.18/install.sh | bash</div>
+            <button class="btn install-copy" onclick="copyInstall()">Copy</button>
+          </div>
+          <p class="install-note">Something missing here?
+            <a href="https://github.com/Ga0512/SursumAI/issues" target="_blank" rel="noopener">Open an issue</a> —
+            the docs are part of the repository.</p>
+        </div>
+      </article>
+    </div>
+  </main>
+
+  <footer class="site-foot">
+    <span>SursumAI &middot; MIT licensed</span>
+    <a href="/">Home</a>
+    <a href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Ga0512/SursumAI/tree/main/bench" target="_blank" rel="noopener">Benchmark method</a>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>
