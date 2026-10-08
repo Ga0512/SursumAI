@@ -76,9 +76,15 @@ h1, h2, h3 { color: var(--ink); line-height: 1.2; }
   position: fixed;
   inset: 0;
   z-index: -1;
+  /* a faint grid under a soft glow: the page looks designed without a single
+     decoration competing with the content */
   background:
-    radial-gradient(120% 60% at 50% -10%, #ffffff 0%, rgba(255,255,255,0) 60%),
+    radial-gradient(90% 50% at 50% -5%, rgba(99, 91, 255, 0.07) 0%, rgba(99, 91, 255, 0) 70%),
+    radial-gradient(120% 60% at 50% -10%, #ffffff 0%, rgba(255, 255, 255, 0) 60%),
+    linear-gradient(var(--border) 1px, transparent 1px) 0 0 / 100% 72px,
+    linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0 / 72px 100%,
     var(--bg);
+  mask-image: radial-gradient(130% 80% at 50% 0%, #000 35%, rgba(0, 0, 0, 0.35) 75%, transparent 100%);
 }
 
 .token-chip {
@@ -1271,3 +1277,30 @@ a.btn { text-decoration: none; }
 /* air between sections — a page that breathes is a page people stay on */
 .landing-section { padding-top: var(--s7); padding-bottom: var(--s7); }
 .step-section + .step-section { padding-top: var(--s6); }
+
+/* the eyebrow: a small word above each heading, so the page has a rhythm and
+   you know where you are without reading the paragraph */
+.eyebrow { display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: var(--s2); }
+.step-copy .eyebrow { margin-bottom: 4px; }
+.landing-section > .eyebrow { text-align: center; }
+
+/* cards float on the grid instead of being boxed in by it */
+.number, .plan, .versus-col, .step-shot img, .install-box {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(10, 37, 64, 0.04), 0 12px 32px rgba(10, 37, 64, 0.05);
+}
+.step-shot img { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+.step-shot img:hover { transform: translateY(-3px);
+  box-shadow: 0 2px 4px rgba(10, 37, 64, 0.05), 0 20px 46px rgba(10, 37, 64, 0.1); }
+
+/* the page should not end in a hard line */
+.site-foot { border-top: none; }
+.landing-cta { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: var(--s7) var(--s5); margin: var(--s6) auto 0; max-width: 860px;
+  box-shadow: 0 1px 2px rgba(10, 37, 64, 0.04), 0 16px 40px rgba(10, 37, 64, 0.06); }
+
+@media (prefers-reduced-motion: reduce) {
+  .step-shot img { transition: none; }
+  .step-shot img:hover { transform: none; }
+}
