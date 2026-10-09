@@ -16,6 +16,10 @@ PY="$ROOT/.venv/bin/python"
 LOGDIR="/tmp/opencode"
 mkdir -p "$LOGDIR"
 
+# `setsid` is GNU coreutils: macOS does not have it. nohup alone still detaches
+# from the terminal there, which is all this needs.
+if command -v setsid >/dev/null 2>&1; then DETACH="setsid"; else DETACH=""; fi
+
 WEB_PORT="${SURSUMAI_WEB_PORT:-3000}"
 CENTRAL_PORT="${SURSUMAI_CENTRAL_PORT:-8001}"
 AGENT_PORT="${SURSUMAI_AGENT_PORT:-8010}"
@@ -54,7 +58,7 @@ fi
 sleep 1
 
 echo "Starting Agent ($AGENT_PORT)..."
-setsid nohup "$PY" -m uvicorn agent.app:app --host "$SURSUMAI_BIND" --port "$AGENT_PORT" \
+$DETACH nohup "$PY" -m uvicorn agent.app:app --host "$SURSUMAI_BIND" --port "$AGENT_PORT" \
   >> "$LOGDIR/agent.log" 2>&1 &
 
 if [ "$AGENT_ONLY" = "1" ]; then
@@ -75,11 +79,11 @@ if [ "$AGENT_ONLY" = "1" ]; then
 fi
 
 echo "Starting Central ($CENTRAL_PORT)..."
-setsid nohup "$PY" -m uvicorn central.app:app --host "$SURSUMAI_BIND" --port "$CENTRAL_PORT" \
+$DETACH nohup "$PY" -m uvicorn central.app:app --host "$SURSUMAI_BIND" --port "$CENTRAL_PORT" \
   >> "$LOGDIR/central.log" 2>&1 &
 
 echo "Starting Web ($WEB_PORT)..."
-setsid nohup "$PY" web/server.py --port "$WEB_PORT" --host "$SURSUMAI_BIND" \
+$DETACH nohup "$PY" web/server.py --port "$WEB_PORT" --host "$SURSUMAI_BIND" \
   >> "$LOGDIR/web.log" 2>&1 &
 
 sleep 2

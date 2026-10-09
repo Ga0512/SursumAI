@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_PINNED="v1.0.20"
+SURSUMAI_PINNED="v1.0.21"
 SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
@@ -155,7 +155,11 @@ else
   mkdir -p "$TMP/src"
   tar -xzf "$TMP/sursumai.tar.gz" -C "$TMP/src"
   # GitHub tarballs include a root dir (e.g. sursumai-1.0) — normalize it
-  INNER="$(find "$TMP/src" -maxdepth 2 -name start.sh -printf '%h\n' | head -1)"
+  # `find -printf` is GNU only: on macOS it fails with "unknown primary or
+  # operator", and the install died right here, right after saying the
+  # checksum was fine. dirname is POSIX and works on both.
+  START="$(find "$TMP/src" -maxdepth 2 -name start.sh | head -1)"
+  INNER="${START:+$(dirname "$START")}"
   SOURCE="${INNER:-$TMP/src}"
   cp -a "$SOURCE"/. "$SURSUMAI_DIR"/
   ok "Code installed to $SURSUMAI_DIR"
