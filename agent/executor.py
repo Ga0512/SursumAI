@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import signal
 import subprocess
+import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -97,6 +101,73 @@ def _advanced_args(spec: Spec) -> list[str]:
     return args
 
 
+def build_native_cmd(spec: Spec, deploy_id: str) -> list[str]:
+    """`vllm serve` straight on the machine. Same flags as the container gets —
+    they are the server's own, not Docker's."""
+    exe = vllm_here()
+    if not exe:
+        raise TransportError("vLLM is not installed on this machine")
+    head = [sys.executable, "-m", "vllm"] if exe == "python -m vllm" else [exe]
+    cmd = head + [
+        "serve", spec.model,
+        "--host", ports.bind_host(),
+        "--port", str(deploy_port(deploy_id, spec)),
+        "--gpu-memory-utilization", str(spec.gpu_memory_utilization),
+        "--max-model-len", str(spec.max_model_len),
+        "--tensor-parallel-size", str(spec.gpus),
+        "--enable-prefix-caching",
+    ]
+    # the key travels in the environment here too (see runtime_env): argv ends
+    # up in the deploy log and in /proc
+    return cmd + _advanced_args(spec)
+
+
+def _native_pid_file(deploy_id: str) -> Path:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return LOGS_DIR / f"{deploy_id[:12]}.vllm.pid"
+
+
+def _native_running(deploy_id: str) -> bool:
+    pid_file = _native_pid_file(deploy_id)
+    try:
+        os.kill(int(pid_file.read_text().strip()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _start_native(spec: Spec, deploy_id: str) -> None:
+    cmd = build_native_cmd(spec, deploy_id)
+    _log(deploy_id, "=== vLLM is installed on this machine, running it directly ===")
+    _log(deploy_id, ">>> " + " ".join(cmd))
+    log_path = _log_file(deploy_id)
+    with open(log_path, "ab") as logf:
+        proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                env=runtime_env(spec), start_new_session=True)
+    _native_pid_file(deploy_id).write_text(str(proc.pid))
+    _log(deploy_id, "=== inference server starting ===")
+
+
+def _stop_native(deploy_id: str) -> None:
+    pid_file = _native_pid_file(deploy_id)
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except OSError:
+            break
+        for _ in range(30):
+            if not _native_running(deploy_id):
+                break
+            time.sleep(0.1)
+        if not _native_running(deploy_id):
+            break
+    pid_file.unlink(missing_ok=True)
+
+
 def runtime_env(spec: Spec) -> dict[str, str]:
     """Environment for the docker client: carries the secrets the container
     inherits through the bare `-e NAME` flags in build_cmd."""
@@ -106,6 +177,41 @@ def runtime_env(spec: Spec) -> dict[str, str]:
     if spec.api_key:
         env["VLLM_API_KEY"] = spec.api_key
     return env
+
+
+def vllm_here() -> str:
+    """The `vllm` command on this machine, or "" — a RunPod pod IS a container,
+    so Docker inside it is not an option, but the image often ships vLLM itself.
+    Using what the machine already has beats refusing to run."""
+    exe = shutil.which("vllm")
+    if exe:
+        return exe
+    try:
+        out = subprocess.run([sys.executable, "-c", "import vllm, sys; print(sys.executable)"],
+                             capture_output=True, text=True, timeout=30)
+        if out.returncode == 0:
+            return "python -m vllm"
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return ""
+
+
+def _docker_here() -> bool:
+    try:
+        _docker_info()
+        return True
+    except TransportError:
+        return False
+
+
+def _runtime_strategy() -> str:
+    """docker when Docker is usable, native when the machine already has vLLM
+    installed, and nothing otherwise."""
+    if _docker_here():
+        return "docker"
+    if vllm_here():
+        return "native"
+    return "none"
 
 
 def _docker_info() -> None:
@@ -190,11 +296,16 @@ def _hf_check(spec: Spec) -> tuple[bool, str]:
 
 def preflight(spec: Spec) -> list[dict]:
     checks: list[dict] = []
-    try:
-        _docker_info()
-        checks.append({"name": "docker", "ok": True, "detail": "Docker available"})
-    except TransportError as e:
-        checks.append({"name": "docker", "ok": False, "detail": str(e)})
+    strategy = _runtime_strategy()
+    if strategy == "docker":
+        checks.append({"name": "runtime", "ok": True, "detail": "Docker available"})
+    elif strategy == "native":
+        checks.append({"name": "runtime", "ok": True,
+                       "detail": "vLLM is installed on this machine — running it without Docker"})
+    else:
+        checks.append({"name": "runtime", "ok": False,
+                       "detail": "this machine has neither Docker nor vLLM installed — "
+                                 "install one, or deploy with llama.cpp instead"})
 
     if _gpu_available():
         checks.append({"name": "gpu", "ok": True, "detail": "NVIDIA GPU available"})
@@ -209,10 +320,9 @@ def preflight(spec: Spec) -> list[dict]:
             "detail": f"{spec.gpus} GPUs requested but only {count} found — vLLM cannot start with more tensor-parallel GPUs than the machine has.",
         })
 
-    if _image_present():
-        checks.append({"name": "image", "ok": True, "detail": f"image cached ({IMAGE})"})
-    else:
-        checks.append({"name": "image", "ok": True, "detail": f"image will be pulled ({IMAGE})"})
+    if strategy == "docker":
+        where = "cached" if _image_present() else "will be pulled"
+        checks.append({"name": "image", "ok": True, "detail": f"image {where} ({IMAGE})"})
 
     if not spec.model or "/" not in spec.model:
         checks.append({"name": "model", "ok": False, "detail": "model id must be 'org/name'"})
@@ -223,6 +333,10 @@ def preflight(spec: Spec) -> list[dict]:
 
 
 def start(spec: Spec, deploy_id: str) -> str:
+    if _runtime_strategy() == "native":
+        _start_native(spec, deploy_id)
+        return endpoint(deploy_id, spec)
+
     _docker_info()
     log_path = _log_file(deploy_id)
 
@@ -244,6 +358,8 @@ def start(spec: Spec, deploy_id: str) -> str:
 
 
 def is_running(deploy_id: str) -> bool:
+    if _native_running(deploy_id):
+        return True
     name = f"deploy-{deploy_id[:12]}"
     try:
         result = subprocess.run(
@@ -268,6 +384,8 @@ def stage(deploy_id: str) -> str:
 
 
 def _friendly_stage(marker: str) -> str:
+    if "installed on this machine" in marker:
+        return "starting inference server"
     if "pulling image" in marker:
         return "preparing runtime (first run downloads it)"
     if "image ready" in marker:
@@ -280,6 +398,7 @@ def _friendly_stage(marker: str) -> str:
 
 
 def stop(deploy_id: str) -> None:
+    _stop_native(deploy_id)
     name = f"deploy-{deploy_id[:12]}"
     try:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)

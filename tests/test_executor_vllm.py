@@ -93,3 +93,50 @@ def test_no_flag_we_send_is_unknown_to_the_pinned_vllm():
     image = line.index("vllm/vllm-openai:v0.21.0")
     server_flags = {a for a in line[image:] if a.startswith("--")}
     assert server_flags <= _known("vllm"), server_flags - _known("vllm")
+
+
+# ---- a machine that already has vLLM does not need Docker ----
+
+def test_a_pod_with_vllm_installed_runs_it_without_docker(monkeypatch):
+    """A RunPod pod IS a container: Docker inside it is not an option, and its
+    image usually ships vLLM. Refusing to deploy there was the app knowing
+    better than the machine."""
+    monkeypatch.setattr(executor, "_docker_here", lambda: False)
+    monkeypatch.setattr(executor, "vllm_here", lambda: "/usr/local/bin/vllm")
+    assert executor._runtime_strategy() == "native"
+
+    line = executor.build_native_cmd(
+        Spec(model="org/m", runtime="vllm", api_key="k", max_model_len=8192), "d" * 32)
+    assert line[0] == "/usr/local/bin/vllm" and line[1] == "serve" and line[2] == "org/m"
+    assert "--port" in line and line[line.index("--max-model-len") + 1] == "8192"
+    assert "docker" not in " ".join(line)
+
+
+def test_docker_wins_when_both_are_there(monkeypatch):
+    """The image has its CUDA and PyTorch already matched; a local install is
+    the fallback, not the preference."""
+    monkeypatch.setattr(executor, "_docker_here", lambda: True)
+    monkeypatch.setattr(executor, "vllm_here", lambda: "/usr/local/bin/vllm")
+    assert executor._runtime_strategy() == "docker"
+
+
+def test_with_neither_the_preflight_says_so_in_one_sentence(monkeypatch):
+    monkeypatch.setattr(executor, "_docker_here", lambda: False)
+    monkeypatch.setattr(executor, "vllm_here", lambda: "")
+    monkeypatch.setattr(executor, "_gpu_available", lambda: True)
+    monkeypatch.setattr(executor, "_gpu_count", lambda: 1)
+    monkeypatch.setattr(executor, "_hf_check", lambda spec: (True, "found"))
+
+    checks = {c["name"]: c for c in executor.preflight(Spec(model="org/m", runtime="vllm"))}
+    assert checks["runtime"]["ok"] is False
+    assert "neither Docker nor vLLM" in checks["runtime"]["detail"]
+    assert "image" not in checks          # nothing is going to be pulled
+
+
+def test_the_native_server_still_gets_its_key_by_environment(monkeypatch):
+    monkeypatch.setattr(executor, "vllm_here", lambda: "/usr/local/bin/vllm")
+    spec = Spec(model="org/m", runtime="vllm", api_key="sk-internal-abc", hf_token="hf_secret")
+    line = " ".join(executor.build_native_cmd(spec, "d" * 32))
+    assert "sk-internal-abc" not in line and "hf_secret" not in line
+    env = executor.runtime_env(spec)
+    assert env["VLLM_API_KEY"] == "sk-internal-abc" and env["HF_TOKEN"] == "hf_secret"

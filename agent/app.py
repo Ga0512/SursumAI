@@ -196,12 +196,17 @@ async def capabilities():
     gpu = _gpu()
     docker = _docker()
     vram = _gpu_vram_mb()
+    # vLLM needs a container OR the package already installed here: a RunPod pod
+    # is itself a container, so Docker is not an option there, but the image
+    # often ships vLLM
+    vllm = bool(executor.vllm_here())
     return {
         "gpu": gpu,
         "docker": docker,
+        "vllm": vllm,
         "vram_total_mb": vram[0] if vram else None,
         "vram_free_mb": vram[1] if vram else None,
-        "recommended_runtime": "vllm" if (gpu and docker) else "llama",
+        "recommended_runtime": "vllm" if (gpu and (docker or vllm)) else "llama",
     }
 
 

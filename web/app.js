@@ -364,12 +364,16 @@ async function recommendRuntime() {
     // vLLM only ever runs as a container. On a machine without Docker — a
     // RunPod pod is itself a container — picking it used to be allowed and
     // then failed in the preflight: the app knew and let you do it anyway.
-    lockRuntime(caps.docker === false
-      ? "vLLM needs Docker, and this machine does not have it. llama.cpp uses "
-        + "the same GPU without a container."
+    // vLLM runs in a container OR straight from an installed package; only
+    // when neither is there is it out of reach
+    lockRuntime(caps.docker === false && caps.vllm === false
+      ? "vLLM needs Docker or the vllm package, and this machine has neither. "
+        + "llama.cpp uses the same GPU without either."
       : "");
     if (rec === "vllm") {
       note.textContent = "NVIDIA GPU detected: using vLLM for best performance.";
+    } else if (caps.gpu && !caps.docker && caps.vllm) {
+      note.textContent = "NVIDIA GPU and vLLM already installed here: running it without Docker.";
     } else if (caps.gpu && !caps.docker) {
       note.textContent = "NVIDIA GPU found, but no Docker on this machine: using llama.cpp, "
                        + "which runs on the GPU without a container.";
