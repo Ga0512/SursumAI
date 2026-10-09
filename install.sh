@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_PINNED="v1.0.22"
+SURSUMAI_PINNED="v1.0.23"
 SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
@@ -277,8 +277,15 @@ ensure_docker() {
 
 # --- CLI on PATH ----------------------------------------------------------------
 mkdir -p "$BIN_DIR"
-ln -sf "$SURSUMAI_DIR/sursumai/bin/sursumai" "$BIN_DIR/sursumai"
-chmod +x "$SURSUMAI_DIR/sursumai/bin/sursumai"
+# A launcher, not a symlink. The script starts with `#!/usr/bin/env python3`,
+# and on a Mac without the command line tools that resolves to a stub which
+# only opens the Xcode dialog — the CLI never ran. Calling the environment we
+# just built has no such problem, and the CLI gets the app's own dependencies.
+cat > "$BIN_DIR/sursumai" <<LAUNCHER
+#!/bin/sh
+exec "$SURSUMAI_DIR/.venv/bin/python" "$SURSUMAI_DIR/sursumai/bin/sursumai" "\$@"
+LAUNCHER
+chmod +x "$BIN_DIR/sursumai" "$SURSUMAI_DIR/sursumai/bin/sursumai"
 
 add_path() {
   local rc="$1" line='export PATH="$HOME/.local/bin:$PATH"'

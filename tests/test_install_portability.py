@@ -63,3 +63,18 @@ def test_the_mac_stub_is_explained_not_just_reported():
     assert "xcode-select --install" in text, (
         "on macOS a venv fails because the command line tools are missing; "
         "the installer has to say so")
+
+
+def test_the_command_does_not_depend_on_the_system_python():
+    """`#!/usr/bin/env python3` on a Mac without the command line tools points
+    at a stub that opens the Xcode dialog and runs nothing. The installed
+    command has to call the environment the installer just built."""
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert 'ln -sf "$SURSUMAI_DIR/sursumai/bin/sursumai" "$BIN_DIR/sursumai"' not in text
+    assert '.venv/bin/python" "$SURSUMAI_DIR/sursumai/bin/sursumai"' in text
+
+
+def test_the_launcher_passes_the_arguments_through():
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    launcher = text[text.index("cat > \"$BIN_DIR/sursumai\""):text.index("LAUNCHER\nchmod")]
+    assert '"\$@"' in launcher, "without $@ the launcher swallows `status`, `update`…"
