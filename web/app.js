@@ -1408,7 +1408,91 @@ function noThinkBody(checkboxId) {
 }
 
 /* ---- settings ---- */
+/* What the machine already has. A rented pod is rarely empty — it usually
+   ships PyTorch and sometimes vLLM — so the dashboard shows what is there and
+   only offers to fill a real gap. Installing vLLM is 8 GB and minutes, so it
+   never happens on its own. */
+let runtimesTimer = null;
+
+async function loadRuntimes() {
+  const box = document.getElementById("runtimesList");
+  if (!box) return;
+  let r;
+  try {
+    const res = await fetch(`${API}/meta/runtimes`, { headers: authHeaders() });
+    if (!res.ok) throw new Error("no");
+    r = await res.json();
+  } catch {
+    box.textContent = "Could not ask this machine what it has.";
+    return;
+  }
+
+  const caps = await fetch(`${API}/meta/capabilities`, { headers: authHeaders() })
+    .then((x) => x.json()).catch(() => ({}));
+  const rows = [
+    ["GPU", caps.gpu, caps.gpu ? `NVIDIA driver ${r.driver || "?"}` : "no NVIDIA GPU here"],
+    ["Docker", caps.docker, caps.docker ? "runs vLLM in its own image" : "not installed"],
+    ["vLLM", r.vllm.present,
+      r.vllm.present ? `${r.vllm.version || "installed"} · ${r.vllm.where}`
+                     : `not here — about ${r.vllm.needs_gb} GB to install`],
+    ["PyTorch", r.torch.present,
+      r.torch.present ? `${r.torch.version} · CUDA ${r.torch.cuda || "none"}` : "not installed"],
+    ["llama.cpp", true, "always available — SursumAI brings its own"],
+  ];
+
+  box.innerHTML = rows.map(([name, ok, detail]) => `
+    <div class="runtime-row">
+      <span class="runtime-dot ${ok ? "on" : "off"}"></span>
+      <span class="runtime-name">${name}</span>
+      <span class="runtime-detail">${escapeHtml(detail)}</span>
+    </div>`).join("") + runtimeAction(r, caps);
+
+  const log = document.getElementById("runtimesLog");
+  log.classList.toggle("hidden", !r.installing_vllm || !r.log);
+  if (r.installing_vllm) {
+    log.textContent = r.log || "";
+    log.scrollTop = log.scrollHeight;
+    if (!runtimesTimer) runtimesTimer = setInterval(loadRuntimes, 5000);
+  } else if (runtimesTimer) {
+    clearInterval(runtimesTimer);
+    runtimesTimer = null;
+  }
+}
+
+function runtimeAction(r, caps) {
+  if (r.installing_vllm) {
+    return `<div class="runtime-act"><span class="orb" data-state="downloading"></span>
+      Installing vLLM — this takes a few minutes, you can leave this page.</div>`;
+  }
+  if (r.vllm.present || caps.docker || !caps.gpu) return "";
+  if (!r.vllm.can_install) {
+    return `<div class="runtime-act">Not enough free disk to install vLLM
+      (${r.free_disk_gb} GB free, needs about ${r.vllm.needs_gb + 2} GB).</div>`;
+  }
+  return `<div class="runtime-act">
+    <button class="btn btn-ghost btn-sm" onclick="installVllm(this)">Install vLLM</button>
+    <span>Needs about ${r.vllm.needs_gb} GB and a few minutes. It goes in its own folder
+      and does not touch the Python already on this machine. llama.cpp works today,
+      with no install.</span>
+  </div>`;
+}
+
+async function installVllm(btn) {
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+  try {
+    const res = await fetch(`${API}/meta/runtimes/vllm`, { method: "POST", headers: authHeaders() });
+    if (!res.ok) { toast((await res.json()).detail || "Could not start"); btn.disabled = false; return; }
+  } catch {
+    toast("Could not reach server");
+    btn.disabled = false;
+    return;
+  }
+  loadRuntimes();
+}
+
 async function loadSettings() {
+  loadRuntimes();
   try {
     const d = await (await fetch(`${API}/meta/update`)).json();
     document.getElementById("settingsVersion").textContent = d.current ? `v${d.current}` : "";

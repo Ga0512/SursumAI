@@ -1166,3 +1166,23 @@ select.input, .select { cursor: pointer; }
 .nothink { display: flex; align-items: center; gap: 6px; font-size: 0.8rem;
   color: var(--text-muted); white-space: nowrap; cursor: pointer; user-select: none; }
 .nothink input { cursor: pointer; }
+
+/* What the machine already has, and what it would cost to fill a gap */
+.runtimes { border: 1px solid var(--border); border-radius: var(--r-md, 10px);
+  padding: var(--s4); max-width: 640px; margin-bottom: var(--s5); }
+.runtimes h3 { margin: 0 0 var(--s3); font-size: 0.95rem; }
+.runtime-rows { display: grid; gap: 8px; }
+.runtime-row { display: grid; grid-template-columns: 10px 90px 1fr; align-items: center;
+  gap: 10px; font-size: 0.875rem; }
+.runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.runtime-dot.on { background: var(--green, #0e7c5a); }
+.runtime-dot.off { background: var(--border-strong); }
+.runtime-name { color: var(--ink); font-weight: 600; }
+.runtime-detail { color: var(--text-muted); }
+.runtime-act { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border);
+  font-size: 0.8rem; color: var(--text-muted); }
+.runtime-act span { flex: 1; min-width: 200px; line-height: 1.5; }
+.runtime-log { margin-top: var(--s3); max-height: 180px; overflow: auto; font-size: 0.72rem;
+  background: var(--surface-sunken); border-radius: 8px; padding: var(--s3); color: var(--text-soft); }
+.runtime-log.hidden { display: none; }

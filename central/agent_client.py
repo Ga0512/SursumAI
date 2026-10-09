@@ -84,6 +84,15 @@ def status(deploy_id: str, agent: str | None = None) -> dict:
     return _request("GET", f"/deploys/{deploy_id}/status", agent=agent)
 
 
+def install_vllm(agent: str | None = None) -> dict:
+    """Ask a machine to install vLLM in its own environment. Returns at once."""
+    return _request("POST", "/runtimes/vllm", {}, agent=agent)
+
+
+def runtimes(agent: str | None = None) -> dict:
+    return _request("GET", "/runtimes", agent=agent)
+
+
 def capabilities(agent: str | None = None) -> dict:
     return _request("GET", "/capabilities", agent=agent)
 

@@ -638,7 +638,27 @@ async def meta_capabilities():
     try:
         return await asyncio.to_thread(agent_client.capabilities)
     except agent_client.AgentError:
-        return {"gpu": False, "docker": False, "recommended_runtime": "llama"}
+        return {"gpu": False, "docker": False, "vllm": False,
+                "recommended_runtime": "llama"}
+
+
+@app.get("/meta/runtimes")
+async def meta_runtimes(machine_id: str | None = None, user=Depends(_current_user)):
+    """What a machine already has — vLLM, PyTorch, Docker, free disk."""
+    try:
+        return await asyncio.to_thread(agent_client.runtimes, _agent(machine_id))
+    except agent_client.AgentError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+
+
+@app.post("/meta/runtimes/vllm")
+async def meta_install_vllm(machine_id: str | None = None, user=Depends(_current_user)):
+    """Install vLLM on a machine that has a GPU but no way to run it. Minutes
+    and gigabytes, so it only ever happens because someone asked."""
+    try:
+        return await asyncio.to_thread(agent_client.install_vllm, _agent(machine_id))
+    except agent_client.AgentError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
 
 
 @app.get("/meta/model_fit")

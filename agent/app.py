@@ -19,7 +19,7 @@ from core import keys
 from core import ports
 from core import metrics
 from core.spec import Spec, SpecError
-from . import executor, executor_llama
+from . import executor, executor_llama, runtimes
 
 AGENT_KEY = keys.load_or_create_agent_key()
 
@@ -199,15 +199,40 @@ async def capabilities():
     # vLLM needs a container OR the package already installed here: a RunPod pod
     # is itself a container, so Docker is not an option there, but the image
     # often ships vLLM
-    vllm = bool(executor.vllm_here())
+    installed = runtimes.report()
+    vllm = installed["vllm"]["present"]
     return {
         "gpu": gpu,
         "docker": docker,
         "vllm": vllm,
+        # what is already on this machine, so nothing is downloaded twice and
+        # the dashboard can say what it would cost to fill a gap
+        "runtimes": {**installed, "docker": {"present": docker},
+                     "installing_vllm": runtimes.installing()},
         "vram_total_mb": vram[0] if vram else None,
         "vram_free_mb": vram[1] if vram else None,
         "recommended_runtime": "vllm" if (gpu and (docker or vllm)) else "llama",
     }
+
+
+@app.post("/runtimes/vllm")
+async def install_vllm(x_agent_key: str | None = Header(None)):
+    """Install vLLM here, in our own environment. Returns at once: it takes
+    minutes, and the dashboard follows it through /runtimes."""
+    _require_key(x_agent_key)
+    if runtimes.vllm_command():
+        return {"status": "already installed"}
+    if runtimes.installing():
+        return {"status": "installing"}
+    asyncio.get_running_loop().run_in_executor(None, runtimes.install)
+    return {"status": "started"}
+
+
+@app.get("/runtimes")
+async def runtimes_here(x_agent_key: str | None = Header(None)):
+    _require_key(x_agent_key)
+    return {**runtimes.report(), "installing_vllm": runtimes.installing(),
+            "log": runtimes.install_log(tail=40)}
 
 
 @app.get("/model_fit")

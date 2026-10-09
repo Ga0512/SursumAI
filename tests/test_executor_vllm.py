@@ -140,3 +140,52 @@ def test_the_native_server_still_gets_its_key_by_environment(monkeypatch):
     assert "sk-internal-abc" not in line and "hf_secret" not in line
     env = executor.runtime_env(spec)
     assert env["VLLM_API_KEY"] == "sk-internal-abc" and env["HF_TOKEN"] == "hf_secret"
+
+
+# ---- look before downloading ----
+
+def test_the_machine_s_own_vllm_is_used_before_ours(monkeypatch):
+    """A pod image that ships vLLM should never trigger an 8 GB download."""
+    from agent import runtimes
+
+    monkeypatch.setattr(runtimes.shutil, "which", lambda name: "/usr/local/bin/vllm"
+                        if name == "vllm" else None)
+    assert runtimes.vllm_command() == ["/usr/local/bin/vllm"]
+
+
+def test_our_own_environment_is_the_last_resort(monkeypatch, tmp_path):
+    from agent import runtimes
+
+    venv = tmp_path / "vllm-venv"
+    python = venv / ("Scripts" if runtimes.sys.platform == "win32" else "bin") / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("")
+    monkeypatch.setattr(runtimes, "VLLM_VENV", venv)
+    monkeypatch.setattr(runtimes.shutil, "which", lambda name: None)
+    monkeypatch.setattr(runtimes, "_package",
+                        lambda interpreter, name: "0.21.0" if str(interpreter) == str(python) else "")
+
+    assert runtimes.vllm_command() == [str(python), "-m", "vllm"]
+
+
+def test_nothing_installed_is_an_empty_answer_not_an_error(monkeypatch, tmp_path):
+    from agent import runtimes
+
+    monkeypatch.setattr(runtimes, "VLLM_VENV", tmp_path / "nope")
+    monkeypatch.setattr(runtimes.shutil, "which", lambda name: None)
+    monkeypatch.setattr(runtimes, "_package", lambda interpreter, name: "")
+    assert runtimes.vllm_command() == []
+
+
+def test_the_report_says_what_is_there_without_installing_anything(monkeypatch, tmp_path):
+    from agent import runtimes
+
+    monkeypatch.setattr(runtimes, "VLLM_VENV", tmp_path / "nope")
+    monkeypatch.setattr(runtimes.shutil, "which", lambda name: None)
+    monkeypatch.setattr(runtimes, "_package", lambda interpreter, name: "")
+    monkeypatch.setattr(runtimes, "_torch", lambda interpreter: {})
+    monkeypatch.setattr(runtimes, "_driver_cuda", lambda: "580.00")
+
+    r = runtimes.report()
+    assert r["vllm"]["present"] is False and r["torch"]["present"] is False
+    assert r["driver"] == "580.00" and r["vllm"]["needs_gb"] > 0
