@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_PINNED="v1.0.23"
+SURSUMAI_PINNED="v1.0.24"
 SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
@@ -281,6 +281,11 @@ mkdir -p "$BIN_DIR"
 # and on a Mac without the command line tools that resolves to a stub which
 # only opens the Xcode dialog — the CLI never ran. Calling the environment we
 # just built has no such problem, and the CLI gets the app's own dependencies.
+# Remove first: an install before v1.0.24 left a SYMLINK here, and `cat >`
+# follows it — the launcher was written straight into the Python script it was
+# supposed to call, and the CLI died with "Missing parentheses in call to
+# 'exec'". Deleting the link means we replace it instead of writing through it.
+rm -f "$BIN_DIR/sursumai"
 cat > "$BIN_DIR/sursumai" <<LAUNCHER
 #!/bin/sh
 exec "$SURSUMAI_DIR/.venv/bin/python" "$SURSUMAI_DIR/sursumai/bin/sursumai" "\$@"
@@ -395,12 +400,18 @@ fi
 # --- launch -----------------------------------------------------------------------
 echo
 ensure_docker || true
-bold "Starting SursumAI…"
 cd "$SURSUMAI_DIR"
-if command -v sursumai >/dev/null 2>&1; then
-  sursumai --ui
+# A scripted install (CI, a provisioning script, an image being baked) wants
+# the install, not a dashboard opening on a machine with no screen.
+if [ -n "${SURSUMAI_NO_START:-}" ]; then
+  ok "Installed. Not starting (SURSUMAI_NO_START is set)."
 else
-  bash "$SURSUMAI_DIR/start.sh"
+  bold "Starting SursumAI…"
+  if command -v sursumai >/dev/null 2>&1; then
+    sursumai --ui
+  else
+    bash "$SURSUMAI_DIR/start.sh"
+  fi
 fi
 
 echo

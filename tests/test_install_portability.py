@@ -78,3 +78,20 @@ def test_the_launcher_passes_the_arguments_through():
     text = (ROOT / "install.sh").read_text(encoding="utf-8")
     launcher = text[text.index("cat > \"$BIN_DIR/sursumai\""):text.index("LAUNCHER\nchmod")]
     assert '"\$@"' in launcher, "without $@ the launcher swallows `status`, `update`…"
+
+
+def test_the_old_symlink_is_removed_before_the_launcher_is_written():
+    """`cat >` follows a symlink. An install before v1.0.23 left one here, so
+    the launcher was written into the Python script it was meant to call, and
+    the CLI died with "Missing parentheses in call to 'exec'"."""
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    remove_at = text.index('rm -f "$BIN_DIR/sursumai"')
+    write_at = text.index('cat > "$BIN_DIR/sursumai"')
+    assert remove_at < write_at, "the link has to go before anything is written"
+
+
+def test_the_cli_script_is_still_python():
+    """If an install ever writes the launcher over it, this is what notices."""
+    script = (ROOT / "sursumai" / "bin" / "sursumai").read_text(encoding="utf-8")
+    assert script.startswith("#!/usr/bin/env python3")
+    assert "exec \"" not in script.splitlines()[1]

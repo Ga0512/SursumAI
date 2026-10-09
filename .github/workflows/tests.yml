@@ -30,6 +30,42 @@ jobs:
       - name: Run tests
         run: python -m pytest
 
+  # The three macOS bugs of v1.0.21-23 (GNU-only `find -printf`, uv installed
+  # and then declared missing, a launcher written through an old symlink) all
+  # shipped because nothing here had ever run on a Mac. This job installs the
+  # real thing on one.
+  macos-install:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install from this checkout
+        env:
+          SURSUMAI_SRC_DIR: ${{ github.workspace }}
+          SURSUMAI_DIR: ${{ runner.temp }}/sursumai
+          SURSUMAI_NO_START: "1"
+        run: bash install.sh
+
+      - name: The command has to actually run
+        run: |
+          # this is what the three bugs broke, each in its own way
+          "$HOME/.local/bin/sursumai" version
+          "$HOME/.local/bin/sursumai" status || true
+
+      - name: The CLI script must still be Python
+        run: head -1 "${{ runner.temp }}/sursumai/sursumai/bin/sursumai" | grep -q python3
+
+  macos-pytest:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
