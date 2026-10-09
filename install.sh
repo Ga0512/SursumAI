@@ -24,7 +24,7 @@ set -euo pipefail
 
 SURSUMAI_REPO="${SURSUMAI_REPO:-Ga0512/SursumAI}"
 # Pinned release. Bump together with the VERSION file when cutting a release.
-SURSUMAI_PINNED="v1.0.21"
+SURSUMAI_PINNED="v1.0.22"
 SURSUMAI_VERSION="${SURSUMAI_VERSION:-$SURSUMAI_PINNED}"
 SURSUMAI_SHA256="${SURSUMAI_SHA256:-}"
 
@@ -175,6 +175,12 @@ ensure_uv() {
     curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 \
       || warn "could not install uv (will try python3)"
   fi
+  # uv lands in ~/.local/bin (older installers: ~/.cargo/bin), which this
+  # shell does not have yet. Without this, the check below fails right
+  # after a successful install and a Mac falls through to the stub at
+  # /usr/bin/python3 — the one that opens the Xcode dialog and builds
+  # nothing.
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   command -v uv >/dev/null 2>&1
 }
 
@@ -197,7 +203,15 @@ else
   [ -n "$PYBIN" ] || fail "no Python 3 found. Install Python 3.10+ or uv."
   ok "Using system Python ($PYBIN)."
   if [ ! -x "$SURSUMAI_DIR/.venv/bin/python" ]; then
-    "$PYBIN" -m venv .venv || fail "could not create the virtual environment"
+    if ! "$PYBIN" -m venv .venv 2>/dev/null; then
+      if [ "$IS_MAC" -eq 1 ]; then
+        # /usr/bin/python3 on macOS is a stub that asks for the command line
+        # tools and builds nothing. Say that, not "could not create".
+        fail "macOS needs its command line tools. Run:  xcode-select --install
+  then run this installer again."
+      fi
+      fail "could not create the virtual environment with $PYBIN"
+    fi
   fi
   PY="$SURSUMAI_DIR/.venv/bin/python"
   "$PY" -m pip install --quiet --upgrade pip

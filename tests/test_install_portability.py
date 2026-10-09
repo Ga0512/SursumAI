@@ -45,3 +45,21 @@ def test_the_checksum_falls_back_to_shasum():
     """macOS ships shasum, not sha256sum."""
     text = (ROOT / "install.sh").read_text(encoding="utf-8")
     assert "sha256sum" in text and "shasum" in text
+
+
+def test_uv_is_put_on_the_path_before_it_is_looked_for():
+    """It installs into ~/.local/bin, which the running shell does not have.
+    Checking before adding it made a fresh Mac fall through to the stub at
+    /usr/bin/python3, which opens the Xcode dialog and builds nothing."""
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    body = text[text.index("ensure_uv()"):text.index("PY=\"\"")]
+    export_at = body.index('export PATH="$HOME/.local/bin')
+    last_check = body.rindex("command -v uv")
+    assert export_at < last_check, "the PATH must be set before the final check"
+
+
+def test_the_mac_stub_is_explained_not_just_reported():
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert "xcode-select --install" in text, (
+        "on macOS a venv fails because the command line tools are missing; "
+        "the installer has to say so")
