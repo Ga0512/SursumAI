@@ -1340,3 +1340,67 @@ a.btn { text-decoration: none; }
 .term-pipe { color: #ffd479; }
 
 @media (max-width: 560px) { .term-body { font-size: 0.76rem; } }
+
+/* ==========================================================================
+   The ROI calculator (calculator.html)
+   Two fields and one answer, so it is one column and nothing else.
+   ========================================================================== */
+.calc-top { max-width: 620px; }
+.calc { text-align: left; display: grid; gap: var(--s5); }
+
+.calc-field { display: grid; gap: var(--s2); }
+.calc-field > label {
+  font-size: 0.9375rem; font-weight: 600; color: var(--ink);
+  display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap;
+}
+.calc-out { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.calc-field select,
+.calc-field input[type="number"] {
+  font: inherit; font-size: 0.9375rem; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r); padding: 10px var(--s3);
+  width: 100%; appearance: none;
+}
+.calc-field select {
+  /* the arrow, drawn rather than imported */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%235a6b83' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right var(--s3) center;
+  background-size: 12px; padding-right: var(--s6);
+}
+.calc-field select:focus-visible,
+.calc-field input:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.calc-spend { display: flex; align-items: center; gap: var(--s2); }
+.calc-cur { color: var(--text-muted); font-weight: 600; }
+.calc-spend input { max-width: 180px; font-variant-numeric: tabular-nums; }
+.calc-range { width: 100%; accent-color: var(--accent); }
+
+.calc-result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: var(--s5);
+}
+.calc-headline {
+  display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  margin-bottom: var(--s4);
+}
+.calc-headline b { font-size: 2.4rem; letter-spacing: -0.02em; line-height: 1; }
+.calc-headline span { font-size: 0.875rem; line-height: 1.5; }
+.calc-good b { color: var(--green); }
+.calc-good span { color: var(--text-soft); }
+.calc-bad b { color: var(--amber); font-size: 1.8rem; }
+.calc-bad span { color: var(--text-soft); }
+
+.calc-read { font-size: 0.9375rem; color: var(--text-soft); line-height: 1.65; margin: 0; }
+.calc-read strong { color: var(--ink); }
+
+@media (max-width: 640px) {
+  .calc-headline b { font-size: 2rem; }
+}

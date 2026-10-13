@@ -91,3 +91,9 @@ jobs:
           node-version: "20"
       - name: Parse the front-end
         run: node --check web/app.js
+
+      - name: Parse the public site
+        run: |
+          for f in site/*.js; do
+            node --check "$f"
+          done
