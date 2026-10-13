@@ -49,16 +49,22 @@ def _central(first_byte_delay=0.0, stream=True):
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             time.sleep(first_byte_delay)
-            for i in range(TOKENS):
-                frame = json.dumps(
-                    {"choices": [{"delta": {"content": f"tok{i} "}}]}
-                ).encode()
-                frame = b"data: " + frame + b"\n\n"
-                self.wfile.write(b"%X\r\n" % len(frame) + frame + b"\r\n")
+            # the timeout test makes the proxy hang up on us halfway. A fake
+            # backend that dies of that prints a traceback on a passing run,
+            # which is how a green suite starts looking broken.
+            try:
+                for i in range(TOKENS):
+                    frame = json.dumps(
+                        {"choices": [{"delta": {"content": f"tok{i} "}}]}
+                    ).encode()
+                    frame = b"data: " + frame + b"\n\n"
+                    self.wfile.write(b"%X\r\n" % len(frame) + frame + b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(TICK)
+                self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()
-                time.sleep(TICK)
-            self.wfile.write(b"0\r\n\r\n")
-            self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
