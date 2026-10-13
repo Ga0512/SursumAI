@@ -1342,11 +1342,10 @@ a.btn { text-decoration: none; }
 @media (max-width: 560px) { .term-body { font-size: 0.76rem; } }
 
 /* ==========================================================================
-   The ROI calculator (calculator.html)
+   The ROI calculator (the #calculator section of the landing page)
    Two fields and one answer, so it is one column and nothing else.
    ========================================================================== */
-.calc-top { max-width: 620px; }
-.calc { text-align: left; display: grid; gap: var(--s5); }
+.calc { max-width: 620px; margin: 0 auto; text-align: left; display: grid; gap: var(--s5); }
 
 .calc-field { display: grid; gap: var(--s2); }
 .calc-field > label {

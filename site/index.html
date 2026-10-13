@@ -19,7 +19,7 @@
         <a class="btn btn-ghost" href="#numbers">Numbers</a>
         <a class="btn btn-ghost" href="#why">Why</a>
         <a class="btn btn-ghost" href="#pricing">Pricing</a>
-        <a class="btn btn-ghost" href="/calculator.html">Calculator</a>
+        <a class="btn btn-ghost" href="/#calculator">Calculator</a>
         <a class="btn btn-ghost" href="https://github.com/Ga0512/SursumAI" target="_blank" rel="noopener">GitHub</a>
         <a class="btn btn-primary" href="#install">Install</a>
       </div>
@@ -295,7 +295,49 @@ client.chat.completions.create(
           <a class="btn btn-primary plan-cta" href="https://app.sursumai.com">Go Pro</a>
         </div>
       </div>
-      <p class="bench-caveat">No per-user or per-token pricing: your models run on your hardware, and your prompts never pass through us. <a href="/calculator.html">Work out what that saves you &rarr;</a></p>
+      <p class="bench-caveat">No per-user or per-token pricing: your models run on your hardware, and your prompts never pass through us. <a href="#calculator">Work out what that saves you &rarr;</a></p>
+    </div>
+
+    <div class="landing-section" id="calculator">
+      <span class="eyebrow">Calculator</span>
+      <h2>What you save by running it yourself</h2>
+      <p class="landing-sub">Two questions.</p>
+
+      <div class="calc">
+        <div class="calc-field">
+          <label for="calcSpend">What do you pay a month for inference?
+            <output id="calcSpendOut" class="calc-out"></output></label>
+          <div class="calc-spend">
+            <span class="calc-cur">$</span>
+            <input id="calcSpend" type="number" min="0" max="200000" step="50" inputmode="numeric" />
+          </div>
+          <input id="calcSpendRange" class="calc-range" type="range" min="0" max="20000" step="50"
+                 aria-label="Monthly spend" />
+        </div>
+
+        <div class="calc-field">
+          <label for="calcMachine">Where would it run instead?</label>
+          <select id="calcMachine"></select>
+        </div>
+
+        <div class="calc-field" id="calcHoursRow">
+          <label for="calcHours">How much of the day does it need to be awake?</label>
+          <select id="calcHours">
+            <option value="24">All day &mdash; it answers a live service</option>
+            <option value="8">About 8 hours &mdash; working hours</option>
+            <option value="2">A couple of hours &mdash; a batch job</option>
+          </select>
+        </div>
+
+        <div class="calc-result" id="calcOut"></div>
+      </div>
+
+      <p class="bench-caveat">Rental prices are the median verified on-demand
+        offer on Vast.ai, <span id="calcAsof"></span>. Electricity on a machine
+        you own is not counted: a few dollars a month on a Mac, nearer $80 on a
+        desktop GPU running all day. Whether an open model is good enough for
+        your work is the part no calculator settles &mdash; testing it costs
+        nothing, so test it.</p>
     </div>
 
     <div class="landing-section" id="faq">
@@ -358,5 +400,6 @@ client.chat.completions.create(
   </footer>
 
   <script src="site.js"></script>
+  <script src="calculator.js"></script>
 </body>
 </html>
