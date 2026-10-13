@@ -97,3 +97,10 @@ jobs:
           for f in site/*.js; do
             node --check "$f"
           done
+
+      # node --check is syntax only. The deploy's Test tab read an identifier
+      # that belongs to another function, which is valid syntax and a
+      # ReferenceError at runtime -- it reported "Could not reach server" about
+      # a healthy model and shipped because nothing ever ran the function.
+      - name: Run the dashboard chat senders
+        run: node tests/app_sendplay.js

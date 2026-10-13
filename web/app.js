@@ -613,10 +613,19 @@ function render(deploys) {
   grid.innerHTML = deploys.map(cardHTML).join("");
 }
 
+/* "1 GPU" is a count of NVIDIA cards for vLLM's --tensor-parallel-size. For
+   llama.cpp the number is never used -- only whether it is zero -- so the card
+   claimed "llama . 1 GPU" on a MacBook, where there is no NVIDIA GPU at all
+   and the work runs on Metal. Say it only where it means something. */
+function gpuLabel(spec) {
+  if ((spec.runtime || "vllm") !== "vllm") return "";
+  return ` · ${spec.gpus} GPU${spec.gpus > 1 ? "s" : ""}`;
+}
+
 function cardHTML(d) {
   const status = d.status;
   const where = deployWhere(d);
-  const meta = `${d.spec.runtime || "vllm"}${where ? " · " + escapeHtml(where) : ""} · ${d.spec.gpus} GPU${d.spec.gpus > 1 ? "s" : ""}`;
+  const meta = `${d.spec.runtime || "vllm"}${where ? " · " + escapeHtml(where) : ""}${gpuLabel(d.spec)}`;
   const url = displayUrl(d);
   // errors can carry text from ssh or an installer on another machine
   const err = d.error ? `<div class="meta" style="color:var(--red)">${escapeHtml(d.error)}</div>` : "";
@@ -1054,7 +1063,7 @@ async function refreshDetail() {
 function renderDetailMetrics(d) {
   document.getElementById("detailTitle").textContent = displayName(d);
   document.getElementById("detailSub").textContent =
-    `${d.spec.runtime}${deployWhere(d) ? " · " + deployWhere(d) : ""} · ${d.spec.gpus} GPU`;
+    `${d.spec.runtime}${deployWhere(d) ? " · " + deployWhere(d) : ""}${gpuLabel(d.spec)}`;
   const st = document.getElementById("detailStatus");
   st.className = `status ${d.status}`;
   st.innerHTML = `<span class="dot"></span>${STATUS_LABEL[d.status] || d.status}`;
@@ -1205,6 +1214,8 @@ async function sendPlay() {
   stopBtn.classList.remove("hidden");
   playStreaming = true;
   playController = new AbortController();
+  // a byte of the answer proves the server was reached; see the catch
+  let started = false;
   try {
     const res = await fetch(`${API}/deploys/${detailId}/chat`, {
       method: "POST",
@@ -1225,8 +1236,14 @@ async function sendPlay() {
     div.className = "msg assistant";
     // a model that reasons takes a minute before its first word; without this
     // the page looked frozen and people pressed send again
+    // "thinking", never the pool ternary: this tab talks to one deploy, so
+    // there is no judge. The ternary was copied from sendChat, where isPool
+    // exists -- here it was an unbound identifier, so every message raised a
+    // ReferenceError before the bubble was appended and the catch below
+    // reported "Could not reach server" about a model that had already
+    // answered. This tab had never worked.
     div.innerHTML = '<div class="role">Assistant</div><details class="think hidden"><summary>Reasoning</summary><div class="think-body"></div></details>'
-                  + `<div class="content"><span class="orb" data-state="${isPool ? "judging" : "thinking"}"></span></div>`;
+                  + '<div class="content"><span class="orb" data-state="thinking"></span></div>';
     box.appendChild(div);
     const thinkEl = div.querySelector(".think");
     // reasoning is collapsed by default: on a thinking model it is longer than
@@ -1242,6 +1259,7 @@ async function sendPlay() {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
+      started = true;
       let sep;
       while ((sep = buf.indexOf("\n\n")) >= 0) {
         const chunk = buf.slice(0, sep);
@@ -1287,6 +1305,11 @@ async function sendPlay() {
   } catch (e) {
     if (e.name === "AbortError") {
       addPlayMsg("assistant", '<div class="content"><em>stopped</em></div>');
+    } else if (started) {
+      // Reached and then cut off: a proxy timeout, a dropped tunnel, a
+      // killed process. Saying "could not reach" here cost two debugging
+      // sessions on the wrong layer.
+      addPlayMsg("error", `<div class="content">The answer started and then stopped. The connection dropped mid-stream &mdash; the model may still be running, so check Logs before asking again.</div>`);
     } else {
       addPlayMsg("error", `<div class="content">Could not reach server</div>`);
     }
@@ -1905,6 +1928,8 @@ async function sendChat() {
   stopBtn.classList.remove("hidden");
   chatController = new AbortController();
   const isPool = target.startsWith("pool:");
+  // a byte of the answer proves the server was reached; see the catch
+  let started = false;
   try {
     const url = isPool ? `${API}/v1/chat/completions` : `${API}/deploys/${target}/chat`;
     const body = isPool
@@ -1945,6 +1970,7 @@ async function sendChat() {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
+      started = true;
       let sep;
       while ((sep = buf.indexOf("\n\n")) >= 0) {
         const chunk = buf.slice(0, sep);
@@ -1987,6 +2013,8 @@ async function sendChat() {
   } catch (e) {
     if (e.name === "AbortError") {
       addChatMsg("assistant", '<div class="content"><em>stopped</em></div>');
+    } else if (started) {
+      addChatMsg("error", `<div class="content">The answer started and then stopped. The connection dropped mid-stream &mdash; the model may still be running, so check Logs before asking again.</div>`);
     } else {
       addChatMsg("error", `<div class="content">Could not reach server</div>`);
     }

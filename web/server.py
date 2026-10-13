@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import json
 import os
 import sys
 import urllib.error
@@ -15,6 +16,32 @@ from core import ports  # noqa: E402
 
 CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", f"http://localhost:{ports.CENTRAL_PORT}")
 
+# A proxy has to outlive what it proxies. The central waits
+# SURSUMAI_CHAT_TIMEOUT (900 s) for a model that reasons; this was a hard
+# 300 s, and the timeout applies to every read, so on a slow machine the
+# proxy gave up first. The TimeoutError is neither HTTPError nor URLError,
+# so it escaped uncaught after the headers had already been sent, the
+# connection died mid-response, and the page reported "Could not reach
+# server" while the model was alive and still answering.
+UPSTREAM_TIMEOUT = float(os.environ.get("SURSUMAI_CHAT_TIMEOUT", 900)) + 60
+
+
+def _stream_error(headers: http.server.BaseHTTPRequestHandler, ctype: str,
+                  message: str) -> None:
+    """Report a failure that happened after the response already started.
+
+    web/app.js acts on a `data:` frame carrying `error`, so this reaches the
+    user as a sentence. A truncated body can only reach them as a guess.
+    """
+    if "event-stream" not in ctype:
+        return                  # a plain JSON body: truncation is all we have
+    frame = ("data: " + json.dumps({"error": message}) + "\n\n").encode()
+    try:
+        headers.wfile.write(f"{len(frame):X}\r\n".encode() + frame + b"\r\n")
+        headers.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
 
 def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, method: str, path: str):
     """Forward a request to the central backend and stream the response back.
@@ -24,7 +51,8 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
 
     Streaming (SSE) requires HTTP/1.1 + Transfer-Encoding: chunked — HTTP/1.0
     close-delimited responses make browsers buffer until EOF (the whole reply
-    arrives at once instead of token by token).
+    arrives at once instead of token by token). It also requires reading the
+    upstream with read1 and not sending Connection: close, both below.
 
     Returns True if the request was proxied (matched /api), False otherwise.
     """
@@ -38,17 +66,34 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
         if headers.headers.get(h):
             req.add_header(h, headers.headers[h])
     try:
-        with urllib.request.urlopen(req, timeout=300) as upstream:
+        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as upstream:
             status = upstream.status
             ctype = upstream.headers.get("Content-Type", "application/json")
             headers.send_response(status)
             headers.send_header("Content-Type", ctype)
             headers.send_header("Cache-Control", "no-cache")
-            headers.send_header("Connection", "close")
             headers.send_header("Transfer-Encoding", "chunked")
             headers.end_headers()
             while True:
-                chunk = upstream.read(65536)
+                # read1, never read: HTTPResponse.read(n) blocks until it
+                # has n bytes or the body ends, so every token of a
+                # streamed reply sat here until the model finished.
+                # Measured against a backend emitting one token a second
+                # for five seconds: read(65536) returned nothing for 5.0 s
+                # and then 255 bytes at once, while read1 handed over each
+                # token as it arrived. On a fast GPU the whole answer lands
+                # in two seconds and the bug is invisible; on a laptop it
+                # is minutes of a blank screen.
+                try:
+                    chunk = upstream.read1(65536)
+                except TimeoutError:
+                    # The headers are long gone, so there is no status code
+                    # left to send. Say it in the stream the page is already
+                    # reading; dropping the socket is what made a slow model
+                    # indistinguishable from an unreachable server.
+                    _stream_error(headers, ctype, "the model took too long"
+                                  " to answer - raise SURSUMAI_CHAT_TIMEOUT")
+                    break
                 if not chunk:
                     break
                 try:
