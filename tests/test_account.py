@@ -8,6 +8,7 @@ someone who paid, and a refund does take it away.
 import base64
 import hashlib
 import json
+import os
 import time
 import urllib.error
 
@@ -127,6 +128,11 @@ def test_editing_the_plan_in_a_real_answer_breaks_it(api):
         account.connect(TOKEN)
 
 
+# the same skip test_auth.py and test_executor_llama.py already carry for the
+# identical assertion: NTFS ignores chmod, so this reads 666 on Windows and the
+# whole suite is red for a reason that has nothing to do with the code. The CI
+# runs it on Linux and macOS, which is where the mode means something.
+@pytest.mark.skipif(os.name != "posix", reason="file modes are POSIX-only")
 def test_the_file_with_the_token_is_not_readable_by_others(api):
     account.connect(TOKEN)
     assert oct(account.ACCOUNT_FILE.stat().st_mode)[-3:] == "600"
