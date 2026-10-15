@@ -237,6 +237,14 @@ class RouterChatRequest(BaseModel):
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
     seed: int | None = None
+    # A coding agent is nothing without these. An undeclared field is
+    # discarded by Pydantic without a word, so the tool list never reached
+    # the runtime: the model was never told it had tools, answered in prose
+    # about what it would do, and the client waited for a call that could
+    # not come.
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
+    parallel_tool_calls: bool | None = None
 
 
 # Asking a Qwen-style model not to think has two halves, and only one of them
@@ -260,7 +268,11 @@ PASSTHROUGH = ("response_format", "stop", "top_p",
                # reads `enable_thinking` and `reasoning_effort` (xhigh default,
                # also medium and low), so dropping them left the model at
                # maximum reasoning no matter what the client asked for.
-               "chat_template_kwargs", "reasoning_effort")
+               "chat_template_kwargs", "reasoning_effort",
+               # tools go to the runtime untouched; llama.cpp needs the
+               # model's own template for the call grammar, which is what
+               # jinja mode gives it, and vLLM reads them directly.
+               "tools", "tool_choice", "parallel_tool_calls")
 
 
 def _passthrough(req) -> dict:

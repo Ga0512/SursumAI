@@ -758,6 +758,62 @@ def test_response_format_and_friends_are_forwarded(client):
     assert sent["stop"] == ["\n\n"] and sent["top_p"] == 0.9 and sent["seed"] == 7
 
 
+def test_tools_reach_the_runtime(client):
+    """Dropping these made the API useless to any coding agent: it sends the
+    tool list on every turn and waits for a call back."""
+    from central import app as central_app
+
+    tools = [{"type": "function", "function": {"name": "read_file",
+                                               "parameters": {"type": "object"}}}]
+    req = central_app.RouterChatRequest(
+        messages=[{"role": "user", "content": "read main.py"}],
+        tools=tools, tool_choice="auto", parallel_tool_calls=False)
+    sent = central_app._passthrough(req)
+
+    assert sent["tools"] == tools
+    assert sent["tool_choice"] == "auto"
+    # False is a real answer, not an absent one: _passthrough drops None only
+    assert sent["parallel_tool_calls"] is False
+
+
+def test_a_tool_call_comes_back_through_a_deploy(client, monkeypatch):
+    """The answer carries tool_calls instead of content, and nothing on the way
+    back may flatten that into prose."""
+    import asyncio
+
+    from central import agent_client
+    from central import app as central_app
+
+    seen = {}
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path": "main.py"}'}}
+
+    def _chat(endpoint, payload, api_key=None, timeout=None):
+        seen.update(payload)
+        return {"choices": [{"message": {"role": "assistant", "content": None,
+                                         "tool_calls": [call]},
+                             "finish_reason": "tool_calls"}], "usage": {}}
+
+    monkeypatch.setattr(agent_client, "chat", _chat)
+    deploy = type("D", (), {
+        "status": central_app.DeployState.HEALTHY,
+        "endpoint": "http://x/v1",
+        "spec": type("S", (), {"model": "org/m", "api_key": "k"})(),
+    })()
+    req = central_app.RouterChatRequest(
+        messages=[{"role": "user", "content": "read main.py"}],
+        tools=[{"type": "function", "function": {"name": "read_file"}}])
+
+    # asyncio.run, not get_event_loop(): by the time the whole suite reaches
+    # here another test has closed the loop and 3.10 raises instead of making
+    # a new one -- the test passed alone and failed in company.
+    out = asyncio.run(central_app._chat_with_deploy(deploy, req))
+
+    assert seen["tools"], "the tool list did not reach the runtime"
+    assert out["choices"][0]["message"]["tool_calls"] == [call]
+    assert out["choices"][0]["finish_reason"] == "tool_calls"
+
+
 def test_what_was_not_asked_for_is_not_invented(client):
     from central import app as central_app
 
