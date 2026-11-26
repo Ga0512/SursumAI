@@ -25,6 +25,42 @@ CENTRAL_URL = os.environ.get("SURSUMAI_CENTRAL", f"http://localhost:{ports.CENTR
 # server" while the model was alive and still answering.
 UPSTREAM_TIMEOUT = float(os.environ.get("SURSUMAI_CHAT_TIMEOUT", 900)) + 60
 
+# Content-Length is read straight off the wire and the body goes to memory.
+# On loopback that is a non-issue; SURSUMAI_BIND makes this port reachable
+# from the network, and then an unbounded read is the whole attack.
+MAX_BODY = max(int(os.environ.get("SURSUMAI_MAX_BODY_MB", "32")), 1) * 1024 * 1024
+
+
+def _json_error(headers: http.server.BaseHTTPRequestHandler, status: int,
+                message: str) -> None:
+    """Fail with a body both readers understand.
+
+    This used to write a bare `backend unreachable: …` string under
+    `Content-Type: application/json`. `web/app.js` calls `res.json()` on it,
+    which throws, so the catch replaced the reason the proxy already knew
+    with a generic "could not connect" — the one case where we had the
+    answer and threw it away. `detail` is what the dashboard reads; `error`
+    is what an OpenAI client reads.
+    """
+    payload = json.dumps({
+        "detail": message,
+        "error": {"message": message, "type": "api_error", "param": None, "code": None},
+    }).encode()
+    # A refusal that never read the body leaves those bytes in the socket, and
+    # on a keep-alive connection the next read parses the leftover body as a
+    # new request line — the client gets our 413 followed by a bogus 400.
+    # Closing is also what makes a 413 safe to send early at all.
+    headers.close_connection = True
+    headers.send_response(status)
+    headers.send_header("Content-Type", "application/json")
+    headers.send_header("Content-Length", str(len(payload)))
+    headers.send_header("Connection", "close")
+    headers.end_headers()
+    try:
+        headers.wfile.write(payload)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
 
 def _stream_error(headers: http.server.BaseHTTPRequestHandler, ctype: str,
                   message: str) -> None:
@@ -60,7 +96,18 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
     body = None
     length = headers.headers.get("Content-Length")
     if length:
-        body = headers.rfile.read(int(length))
+        try:
+            size = int(length)
+        except ValueError:
+            # a header we cannot parse used to raise ValueError out of the
+            # handler: traceback in the log, dropped socket, no status code
+            _json_error(headers, 400, "malformed Content-Length")
+            return
+        if size < 0 or size > MAX_BODY:
+            _json_error(headers, 413,
+                        f"request body too large (limit {MAX_BODY // (1024 * 1024)} MB)")
+            return
+        body = headers.rfile.read(size)
     req = urllib.request.Request(target, data=body, method=method)
     for h in ("Content-Type", "Authorization", "Accept"):
         if headers.headers.get(h):
@@ -112,14 +159,27 @@ def _forward(headers: http.server.BaseHTTPRequestHandler, central_url: str, meth
         headers.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
         headers.send_header("Content-Length", str(len(payload)))
         headers.end_headers()
-        headers.wfile.write(payload)
+        try:
+            headers.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
     except urllib.error.URLError as e:
-        message = f"backend unreachable: {e.reason}".encode()
-        headers.send_response(502)
-        headers.send_header("Content-Type", "application/json")
-        headers.send_header("Content-Length", str(len(message)))
-        headers.end_headers()
-        headers.wfile.write(message)
+        _json_error(headers, 502, f"backend unreachable: {e.reason}")
+    except TimeoutError:
+        # The comment at the top of this file says TimeoutError is neither
+        # HTTPError nor URLError, and the read loop below handles it — but
+        # `urlopen` itself was covered by those two clauses only. A central
+        # that accepts the connection and then stalls before the first byte
+        # escaped every handler: traceback, dropped socket, and a page that
+        # said "could not reach server" about a server that answered.
+        _json_error(headers, 504, "the backend did not answer in time"
+                                  " - raise SURSUMAI_CHAT_TIMEOUT")
+    except OSError as e:
+        # URLError is an OSError subclass, so it is already handled above;
+        # this catches the rest (a socket error, a refused connection raised
+        # outside urllib) which otherwise took down the request with a
+        # traceback and no response at all.
+        _json_error(headers, 502, f"backend unreachable: {e}")
 
 
 class ProxyHandler(http.server.SimpleHTTPRequestHandler):

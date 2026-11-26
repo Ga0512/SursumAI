@@ -26,8 +26,14 @@ TOKENS = 4
 TICK = 0.3          # a slow model, compressed
 
 
-def _central(first_byte_delay=0.0, stream=True):
-    """A fake central that answers /deploys/x/chat the way the real one does."""
+def _central(first_byte_delay=0.0, stream=True, header_delay=0.0):
+    """A fake central that answers /deploys/x/chat the way the real one does.
+
+    `header_delay` stalls before the status line, so the proxy's `urlopen`
+    times out with nothing sent yet — a different failure from
+    `first_byte_delay`, which stalls after the headers are already on their
+    way and is handled inside the read loop.
+    """
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -36,6 +42,8 @@ def _central(first_byte_delay=0.0, stream=True):
             pass
 
         def do_POST(self):
+            if header_delay:
+                time.sleep(header_delay)
             if not stream:
                 body = json.dumps({"choices": [{"message": {"content": "hi"}}]}).encode()
                 self.send_response(200)
@@ -106,8 +114,8 @@ def _post(srv, path="/api/deploys/x/chat"):
 def plumbing():
     made = []
 
-    def build(first_byte_delay=0.0, chat_timeout=900, stream=True):
-        central = _central(first_byte_delay, stream)
+    def build(first_byte_delay=0.0, chat_timeout=900, stream=True, header_delay=0.0):
+        central = _central(first_byte_delay, stream, header_delay)
         proxy, saved = _proxy(central, chat_timeout)
         made.append((central, proxy, saved))
         return proxy
@@ -173,3 +181,115 @@ def test_plain_json_still_works(plumbing):
     res, parts = _post(plumbing(stream=False))
     assert res.status == 200
     assert json.loads(b"".join(p for _, p in parts))["choices"][0]["message"]["content"] == "hi"
+
+
+def _raw(srv, request: bytes) -> tuple[int, dict, bytes]:
+    """Send bytes we compose ourselves.
+
+    http.client computes Content-Length, so a malformed one can only be tested
+    by writing the request by hand.
+    """
+    import socket
+
+    with socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=30) as s:
+        s.sendall(request)
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            part = s.recv(65536)
+            if not part:
+                break
+            chunks.append(part)
+    raw = b"".join(chunks)
+    head, _, body = raw.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    status = int(lines[0].split()[1])
+    headers = {}
+    for line in lines[1:]:
+        name, _, value = line.partition(b": ")
+        headers[name.decode().lower()] = value.decode()
+    return status, headers, body
+
+
+def _unreachable_proxy(monkeypatch):
+    """The real ProxyHandler pointed at a port where nothing listens."""
+    import socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead_port = probe.getsockname()[1]
+    probe.close()
+    monkeypatch.setattr(web_server, "CENTRAL_URL", f"http://127.0.0.1:{dead_port}")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), web_server.ProxyHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_unreachable_central_answers_parseable_json(monkeypatch):
+    """The bug: the 502 body was the bare string `backend unreachable: …` sent
+    under Content-Type: application/json. web/app.js calls res.json() on it,
+    which throws, so the catch replaced the reason the proxy already knew with
+    a generic "could not connect". Both readers must find their field."""
+    srv = _unreachable_proxy(monkeypatch)
+    try:
+        res, parts = _post(srv)
+        body = b"".join(p for _, p in parts)
+        assert res.status == 502
+        payload = json.loads(body)          # this is what used to raise
+        assert "unreachable" in payload["detail"]
+        assert "unreachable" in payload["error"]["message"]
+        assert payload["error"]["type"] == "api_error"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_stalled_central_is_a_504_not_a_traceback(plumbing):
+    """A central that accepts the connection and then says nothing times out
+    inside urlopen, which raises TimeoutError -- neither HTTPError nor
+    URLError, so it escaped both clauses and took the request down with a
+    traceback and no response at all."""
+    # -59.7 leaves the proxy 0.3s against a backend that waits much longer
+    proxy = plumbing(header_delay=TICK * 10, chat_timeout=-59.7)
+    res, parts = _post(proxy)
+    assert res.status == 504, "a stalled backend produced no status code"
+    payload = json.loads(b"".join(p for _, p in parts))
+    assert "SURSUMAI_CHAT_TIMEOUT" in payload["detail"]
+
+
+def test_malformed_content_length_is_a_400(plumbing):
+    """int(length) on a header we do not control used to raise ValueError out
+    of the handler: traceback in the log, dropped socket, no status code."""
+    proxy = plumbing()
+    status, headers, body = _raw(proxy, (
+        b"POST /api/deploys/x/chat HTTP/1.1\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: not-a-number\r\n"
+        b"\r\n"
+    ))
+    assert status == 400
+    assert "Content-Length" in json.loads(body)["detail"]
+
+
+def test_oversized_body_is_refused_before_it_is_read(plumbing, monkeypatch):
+    """The body went to memory with no ceiling. On loopback that is nothing;
+    SURSUMAI_BIND puts this port on the network, and then it is the whole
+    attack. The refusal must come from the declared length, without reading
+    the bytes -- this request promises far more than it sends."""
+    monkeypatch.setattr(web_server, "MAX_BODY", 1024 * 1024)
+    proxy = plumbing()
+    status, headers, body = _raw(proxy, (
+        b"POST /api/deploys/x/chat HTTP/1.1\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: 99999999\r\n"
+        b"\r\n"
+        b"{}"
+    ))
+    assert status == 413
+    assert "too large" in json.loads(body)["detail"]
+    # the undrained body must not be parsed as the next request on a
+    # keep-alive connection: our 413 was followed by a bogus 400
+    assert headers.get("connection") == "close"
+    assert b"Bad request syntax" not in body

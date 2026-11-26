@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core import keys
+from core import logs as logcfg
 from core import ports
 from core import metrics
 from core.spec import Spec, SpecError
@@ -48,6 +49,7 @@ def _check_key_exposure() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logcfg.setup("agent")
     _check_key_exposure()
     yield
 
@@ -412,9 +414,20 @@ async def deploy_status(deploy_id: str, x_agent_key: str | None = Header(None)):
 
 
 def _log_size(deploy_id: str) -> int:
+    """The log's size, and the one place that keeps it from growing forever.
+
+    The central polls this every 10 s for every live deploy, so it is where a
+    cap costs nothing: `trim` reads one `stat` and returns when the file is
+    below the ceiling. A trim makes the number go *down*, which the central
+    reads as movement just like a rise — it watches `(stage, log_bytes)` for
+    change, not for growth — so a capped log never looks like a stalled start.
+    """
     for module in (executor_llama, executor):
         try:
-            return module._log_file(deploy_id).stat().st_size
+            path = module._log_file(deploy_id)
+            if not path.exists():
+                continue
+            return logcfg.trim(path)
         except OSError:
             continue
     return 0

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 
 /* ==========================================================================
    Design tokens
@@ -1186,3 +1186,60 @@ select.input, .select { cursor: pointer; }
 .runtime-log { margin-top: var(--s3); max-height: 180px; overflow: auto; font-size: 0.72rem;
   background: var(--surface-sunken); border-radius: 8px; padding: var(--s3); color: var(--text-soft); }
 .runtime-log.hidden { display: none; }
+
+/* Workspace hierarchy and onboarding. All fonts work offline. */
+:root {
+  --bg: #f8f9fb;
+  --ink: #17212f;
+  --text: #283444;
+  --text-soft: #596575;
+  --text-muted: #667385;
+  --border: #e5e8ee;
+}
+.nav { padding: 18px max(24px, calc((100vw - 1152px) / 2)); }
+.dash { max-width: 1200px; padding-top: 40px; }
+.workspace-head { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 32px; }
+.eyebrow { display: block; color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; margin-bottom: 10px; }
+.workspace-head h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 600; letter-spacing: -.04em; }
+.workspace-head p { margin-top: 10px; color: var(--text-soft); font-size: 14px; }
+.workspace-label { font-size: 12px; color: var(--text-soft); padding: 6px 11px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); white-space: nowrap; }
+.dash-head { margin-bottom: 28px; }
+.workspace-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 32px; }
+.workspace-summary > div { padding: 21px 24px; display: flex; flex-direction: column; gap: 8px; }
+.workspace-summary > div + div { border-left: 1px solid var(--border); }
+.workspace-summary span { font-size: 12px; color: var(--text-soft); }
+.workspace-summary strong { font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -.04em; color: var(--ink); }
+#summaryReady { color: var(--green); }
+#summaryFailed { color: var(--red); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.section-heading h2 { font-size: 15px; font-weight: 600; }
+.section-heading > span { font-size: 11px; color: var(--text-muted); text-align: right; }
+.connection-notice { padding: 12px 16px; margin-bottom: 20px; border: 1px solid #f0dcc0; border-radius: 8px; color: var(--amber); background: var(--amber-soft); font-size: 13px; }
+.deploy-card { padding: 24px; box-shadow: none; gap: 14px; }
+.deploy-card .model { overflow-wrap: anywhere; }
+.deploy-card .status { flex-shrink: 0; font-size: 12px; }
+.deploy-card .card-actions { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 2px; }
+.deploy-card .card-actions .btn-danger { margin-left: auto; }
+.deploy-card .meta { overflow-wrap: anywhere; }
+.empty { border-style: solid; padding: 48px 32px 32px; }
+.empty > p { max-width: 440px; margin: 0 auto 22px; font-size: 14px; }
+.empty-symbol { width: 44px; height: 44px; display: grid; place-items: center; margin: 0 auto 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); color: var(--accent); font-size: 24px; }
+.getting-started { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; text-align: left; border-top: 1px solid var(--border); padding-top: 28px; margin-top: 36px; }
+.getting-started > div { display: flex; align-items: flex-start; gap: 12px; }
+.getting-started b { color: var(--accent); background: var(--accent-soft); border-radius: 6px; font-size: 10px; padding: 5px 7px; }
+.getting-started span { color: var(--ink); font-size: 12px; font-weight: 600; }
+.getting-started small { display: block; color: var(--text-soft); font-size: 12px; font-weight: 400; margin-top: 5px; }
+@media (max-width: 700px) {
+  .workspace-head { margin-bottom: 24px; }
+  .workspace-label { display: none; }
+  .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-summary > div { padding: 16px; }
+  .workspace-summary > div:nth-child(3) { border-left: 0; }
+  .workspace-summary > div:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .getting-started { grid-template-columns: 1fr; gap: 20px; }
+  .empty { padding: 32px 20px; }
+  .section-heading { align-items: flex-start; }
+  .dash-tabs { max-width: 100%; }
+}
+
+.auth-local-note { font-size: 12px; color: var(--text-muted); padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); margin: 18px 0 24px; }

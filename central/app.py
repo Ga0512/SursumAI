@@ -12,12 +12,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core import account
+from core import logs as logcfg
 from core import promodule
 from core import metrics
 from core import ports
@@ -80,6 +83,7 @@ def _load_pro(app: FastAPI) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logcfg.setup("central")
     store.purge_expired_sessions()
     # deploys elsewhere are left alone here: their connections are not open
     # yet, and a server that is down must not hold the start of the dashboard
@@ -115,6 +119,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# An OpenAI client reads `error.message`; FastAPI writes `{"detail": …}`. So
+# every refusal we were careful to word — "model not ready: provisioning",
+# "no pool named X" — arrived at the SDK as an exception with an EMPTY
+# message, and the caller had to print the raw body to learn anything. The
+# shape is only rewritten under /v1: `web/app.js` reads `data.detail`
+# everywhere, and the management API is ours, not OpenAI's.
+_ERROR_TYPES = {
+    400: "invalid_request_error", 401: "authentication_error",
+    402: "invalid_request_error", 403: "permission_error",
+    404: "not_found_error", 409: "invalid_request_error",
+    413: "invalid_request_error", 422: "invalid_request_error",
+    429: "rate_limit_error",
+}
+
+
+def _openai_error(status: int, message: str, code: str | None = None,
+                  headers: dict | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content={"error": {"message": message,
+                           "type": _ERROR_TYPES.get(status, "api_error"),
+                           "param": None,
+                           "code": code}},
+        # a 401 without WWW-Authenticate is a 401 a client cannot retry:
+        # HTTPBearer sets that header on the exception, and rewriting the body
+        # must not drop it
+        headers=headers,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request, exc: StarletteHTTPException):
+    # Starlette's class, not FastAPI's: FastAPI's subclasses it, so this also
+    # catches the 404 and 405 the router raises before any handler runs.
+    detail = exc.detail
+    message = detail if isinstance(detail, str) else json.dumps(detail)
+    headers = getattr(exc, "headers", None)
+    if not request.url.path.startswith("/v1"):
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail},
+                            headers=headers)
+    return _openai_error(exc.status_code, message, headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request, exc: RequestValidationError):
+    if not request.url.path.startswith("/v1"):
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    # a body the SDK built and we rejected: say which field, in one line
+    first = exc.errors()[0] if exc.errors() else {}
+    where = ".".join(str(p) for p in first.get("loc", ()) if p != "body")
+    reason = first.get("msg", "invalid request body")
+    return _openai_error(422, f"{where}: {reason}" if where else reason)
+
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 

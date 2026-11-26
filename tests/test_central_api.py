@@ -529,7 +529,9 @@ def test_an_unknown_model_says_what_is_available(client):
                              "messages": [{"role": "user", "content": "hi"}]},
                        headers=_auth(key))
     assert resp.status_code == 404
-    assert "org/real" in resp.json()["detail"]
+    # under /v1 the wording lives in error.message, where an OpenAI client
+    # actually looks for it
+    assert "org/real" in resp.json()["error"]["message"]
 
 
 def test_a_model_that_is_not_ready_says_so(client):
@@ -542,7 +544,7 @@ def test_a_model_that_is_not_ready_says_so(client):
                        headers=_auth(key))
     assert resp.status_code == 422
     # the state AND what to do about it: "not ready" alone sent people to the logs
-    detail = resp.json()["detail"]
+    detail = resp.json()["error"]["message"]
     assert "not running right now" in detail and "Redeploy" in detail
 
 
@@ -838,3 +840,65 @@ def test_a_pool_passes_them_to_whoever_answers(client, monkeypatch):
     router_mod._chat(deploy, [{"role": "user", "content": "hi"}], 100, None,
                      {"response_format": {"type": "json_object"}})
     assert seen["response_format"] == {"type": "json_object"}
+
+
+# ---- the shape of a refusal ----
+
+def test_v1_errors_carry_an_openai_error_object(client):
+    """An OpenAI client reads `error.message`. FastAPI writes `{"detail": …}`,
+    so every refusal this project words carefully -- "model not ready",
+    "no pool" -- reached the SDK as an exception with an EMPTY message, and
+    the caller had to print the raw body to learn anything."""
+    token = _register(client)
+    resp = client.post("/v1/chat/completions",
+                       json={"model": "nope", "messages": [{"role": "user", "content": "hi"}]},
+                       headers=_auth(token))
+    assert resp.status_code == 404
+    err = resp.json()["error"]
+    assert err["type"] == "not_found_error"
+    assert err["message"], "an empty message is the bug"
+    assert "nope" in err["message"] or "model" in err["message"].lower()
+
+
+def test_v1_validation_errors_name_the_field(client):
+    """A 422 from pydantic is a list of dicts under `detail`; an SDK shows the
+    user nothing. One sentence naming the field is the whole point."""
+    token = _register(client)
+    resp = client.post("/v1/chat/completions", json={"messages": "not-a-list"},
+                       headers=_auth(token))
+    assert resp.status_code == 422
+    err = resp.json()["error"]
+    assert err["type"] == "invalid_request_error"
+    assert isinstance(err["message"], str) and err["message"]
+
+
+def test_v1_unauthenticated_is_an_authentication_error(client):
+    """A missing key has to arrive as something a client can branch on.
+
+    Note: this 401 carries no WWW-Authenticate header -- `_api_user` raises
+    its own HTTPException rather than letting HTTPBearer do it. Adding the
+    header is correct per RFC 7235 and the handler already forwards whatever
+    the exception carries, but changing how auth answers is not a change to
+    smuggle into a patch release."""
+    resp = client.get("/v1/models")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["type"] == "authentication_error"
+    assert resp.json()["error"]["message"]
+
+
+def test_the_management_api_keeps_detail(client):
+    """web/app.js reads `data.detail` on every management call. The OpenAI
+    shape is for /v1 only -- rewriting it everywhere would blank out every
+    error message in the dashboard."""
+    token = _register(client)
+    resp = client.get("/deploys/does-not-exist", headers=_auth(token))
+    assert resp.status_code == 404
+    assert isinstance(resp.json()["detail"], str)
+    assert "error" not in resp.json()
+
+
+def test_management_validation_errors_keep_the_detail_list(client):
+    token = _register(client)
+    resp = client.post("/pools", json={"name": 5}, headers=_auth(token))
+    assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], list)

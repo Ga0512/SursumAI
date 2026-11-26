@@ -111,7 +111,7 @@ sandbox.globalThis = sandbox;
 
 const source = fs.readFileSync(SRC, "utf8") + `
 ;globalThis.__harness = {
-  sendPlay, sendChat,
+  sendPlay, sendChat, loadDeploys, cardHTML, submitAuth,
   setDetail(v) { detailId = v; },
   play: () => document.getElementById("playMessages"),
   chat: () => document.getElementById("chatMessages"),
@@ -190,6 +190,50 @@ async function run(label, send, prepare) {
     byId("chatInput").value = "hey";
     byId("chatTarget").value = "deploy-123";
   });
+
+  console.log("sign in:");
+  byId("auth_email").value = "person@example.com";
+  byId("auth_password").value = "wrong-password";
+  let finishAuth;
+  let authRequests = 0;
+  sandbox.fetch = () => {
+    authRequests++;
+    return new Promise((resolve) => { finishAuth = resolve; });
+  };
+  const pendingAuth = H.submitAuth();
+  await H.submitAuth();
+  check("sign in ignores duplicate submissions", authRequests === 1, "sent duplicate login requests");
+  check("sign in indicates pending request", byId("authBtn").disabled, "button was still enabled");
+  finishAuth({ ok: false, json: async () => ({ detail: "Incorrect email or password" }) });
+  await pendingAuth;
+  check("failed sign in restores the form", !byId("authBtn").disabled && !byId("authToggle").disabled,
+    "form stayed disabled");
+  check("failed sign in explains the error", byId("toast").textContent === "Incorrect email or password",
+    "error was not shown");
+
+  console.log("dashboard refresh:");
+  sandbox.localStorage.setItem("sg_token", "test-session");
+  sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
+  await H.loadDeploys();
+  check("empty workspace explains the next step",
+    byId("sursumaiGrid").innerHTML.includes("Deploy your first model"), "missing onboarding");
+  const lastGrid = byId("sursumaiGrid").innerHTML;
+  sandbox.fetch = async () => { throw new Error("offline"); };
+  await H.loadDeploys();
+  check("offline refresh preserves the last data",
+    byId("sursumaiGrid").innerHTML === lastGrid, "last data was removed");
+  check("offline refresh warns that data is stale",
+    !byId("deployConnection").classList.contains("hidden") &&
+    byId("deployConnection").textContent.includes("last update"), "missing stale-data warning");
+  sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
+  await H.loadDeploys();
+  check("recovery clears the connection warning",
+    byId("deployConnection").classList.contains("hidden"), "warning remained after recovery");
+  sandbox.fetch = async () => ({ ok: false, status: 401 });
+  await H.loadDeploys();
+  check("expired session returns to sign in",
+    sandbox.localStorage.getItem("sg_token") === null &&
+    !byId("login").classList.contains("hidden"), "expired session stayed active");
 
   if (failures.length) {
     console.error("\nFAILED");

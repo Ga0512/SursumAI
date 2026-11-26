@@ -27,6 +27,7 @@ let creating = false;
 /* ---- auth ---- */
 const TOKEN_KEY = "sg_token";
 let authMode = "login";
+let authSubmitting = false;
 let dashTimer = null;
 
 function getToken() {
@@ -46,19 +47,25 @@ function setSession(data) {
 }
 
 function clearSession() {
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = null;
+  lastDeployRefresh = null;
   localStorage.removeItem(TOKEN_KEY);
   const u = document.getElementById("userName");
   u.classList.add("hidden");
 }
 
 function toggleAuth() {
+  if (authSubmitting) return;
   authMode = authMode === "login" ? "register" : "login";
   document.getElementById("authTitle").textContent =
     authMode === "register" ? "Create your account" : "Welcome back";
   document.getElementById("authSub").textContent =
     authMode === "register"
-      ? "Start self-hosting models under your account"
-      : "Sign in to manage your deployments";
+      ? "Create a local account to deploy and manage your models."
+      : "Sign in to your model workspace.";
+  document.getElementById("auth_password").autocomplete =
+    authMode === "register" ? "new-password" : "current-password";
   document.getElementById("authBtn").textContent =
     authMode === "register" ? "Create account" : "Sign in";
   document.getElementById("authToggle").textContent =
@@ -66,10 +73,17 @@ function toggleAuth() {
 }
 
 async function submitAuth() {
+  if (authSubmitting) return;
   const email = document.getElementById("auth_email").value.trim();
   const password = document.getElementById("auth_password").value;
   if (!email || !password) { toast("Email and password required"); return; }
   const url = authMode === "register" ? `${API}/auth/register` : `${API}/auth/login`;
+  const btn = document.getElementById("authBtn");
+  const toggle = document.getElementById("authToggle");
+  authSubmitting = true;
+  btn.disabled = true;
+  toggle.disabled = true;
+  btn.textContent = authMode === "register" ? "Creating account..." : "Signing in...";
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -77,15 +91,25 @@ async function submitAuth() {
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
-    if (!res.ok) { toast(data.detail || "Auth failed"); return; }
+    if (!res.ok) {
+      toast(typeof data.detail === "string" ? data.detail : "Check your email and password and try again.");
+      return;
+    }
     setSession(data);
+    document.getElementById("auth_password").value = "";
+    switchDash("deploys");
     showView("dashboard");
     loadDeploys();
     checkUpdate();
     loadAccount();
     if (!dashTimer) dashTimer = setInterval(loadDeploys, 5000);
   } catch {
-    toast("Could not reach server");
+    toast("Could not connect to SursumAI. Check that it is running and try again.");
+  } finally {
+    authSubmitting = false;
+    btn.disabled = false;
+    toggle.disabled = false;
+    btn.textContent = authMode === "register" ? "Create account" : "Sign in";
   }
 }
 
@@ -95,7 +119,8 @@ function logout() {
   showView("login");
   document.getElementById("auth_email").value = "";
   document.getElementById("auth_password").value = "";
-  authMode = "login";
+  authMode = "register";
+  toggleAuth();
 }
 
 /* ---- update check ---- */
@@ -592,21 +617,72 @@ const STATUS_LABEL = {
   destroying: "Destroying", redeploying: "Redeploying",
 };
 
+let loadingDeploys = false;
+let lastDeployRefresh = null;
+
 async function loadDeploys() {
-  const res = await fetch(`${API}/deploys`, { headers: authHeaders() });
-  const deploys = await res.json();
-  render(deploys);
+  if (loadingDeploys || !getToken()) return;
+  loadingDeploys = true;
+  const sessionToken = getToken();
+  const notice = document.getElementById("deployConnection");
+  try {
+    const res = await fetch(`${API}/deploys`, { headers: authHeaders() });
+    if (getToken() !== sessionToken) return;
+    if (res.status === 401) {
+      clearSession();
+      showView("login");
+      toast("Your session expired. Sign in to continue.");
+      return;
+    }
+    if (!res.ok) throw new Error("Deployment refresh failed");
+    const deploys = await res.json();
+    if (!Array.isArray(deploys)) throw new Error("Invalid deployment response");
+    // A response belonging to a signed-out session must not redraw its data.
+    if (getToken() !== sessionToken) return;
+    render(deploys);
+    lastDeployRefresh = new Date();
+    if (notice) notice.classList.add("hidden");
+    const freshness = document.getElementById("deployFreshness");
+    if (freshness) freshness.textContent = "Updated just now - refreshes automatically";
+  } catch {
+    if (getToken() !== sessionToken) return;
+    if (notice) {
+      notice.textContent = lastDeployRefresh
+        ? "Connection interrupted. Showing the last update from " + lastDeployRefresh.toLocaleTimeString() + ". Retrying automatically."
+        : "We could not load your models. Check that SursumAI is running. Retrying automatically.";
+      notice.classList.remove("hidden");
+    }
+    const freshness = document.getElementById("deployFreshness");
+    if (freshness) freshness.textContent = "Waiting for connection";
+  } finally {
+    loadingDeploys = false;
+  }
 }
 
 function render(deploys) {
   const grid = document.getElementById("sursumaiGrid");
+  const counts = {
+    summaryTotal: deploys.length,
+    summaryReady: deploys.filter((d) => d.status === "healthy").length,
+    summaryStarting: deploys.filter((d) => ["pending", "checking", "provisioning", "redeploying"].includes(d.status)).length,
+    summaryFailed: deploys.filter((d) => d.status === "failed").length,
+  };
+  for (const [id, value] of Object.entries(counts)) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = value;
+  }
   if (!deploys.length) {
     grid.innerHTML = `
       <div class="empty glass">
-        <h3>No deployments yet</h3>
-        <p>Deploy your first self-hosted model in one click.</p>
-        <br />
-        <button class="btn btn-primary" onclick="openModal()">+ New deployment</button>
+        <span class="empty-symbol" aria-hidden="true">+</span>
+        <h3>Your first model starts here</h3>
+        <p>Choose a model and we will check your machine, download the files and bring it online.</p>
+        <button class="btn btn-primary" onclick="openModal()">Deploy your first model</button>
+        <div class="getting-started">
+          <div><b>01</b><span>Deploy a model<small>We prepare the runtime for your machine.</small></span></div>
+          <div><b>02</b><span>Try it in Playground<small>Send a message and check the response.</small></span></div>
+          <div><b>03</b><span>Connect your application<small>Create an API key and copy your example.</small></span></div>
+        </div>
       </div>`;
     return;
   }
@@ -626,7 +702,7 @@ function cardHTML(d) {
   const status = d.status;
   const where = deployWhere(d);
   const meta = `${d.spec.runtime || "vllm"}${where ? " · " + escapeHtml(where) : ""}${gpuLabel(d.spec)}`;
-  const url = displayUrl(d);
+  const url = publicBaseUrl();
   // errors can carry text from ssh or an installer on another machine
   const err = d.error ? `<div class="meta" style="color:var(--red)">${escapeHtml(d.error)}</div>` : "";
   const stageLabel = deployStageLabel(d);
@@ -639,7 +715,7 @@ function cardHTML(d) {
     <div class="preflight">
       ${d.preflight.map((c) => `
         <span class="preflight-item ${c.ok ? "ok" : "bad"}">
-          ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}
+          ${c.ok ? "&#10003;" : "!"} ${escapeHtml(c.name)}: ${escapeHtml(c.detail)}
         </span>`).join("")}
     </div>` : "";
   const m = d.metrics;
@@ -670,13 +746,13 @@ function cardHTML(d) {
   return `
     <div class="deploy-card glass" onclick="openDetail('${d.id}')">
       <div class="row">
-        <span class="model">◆ ${escapeHtml(displayName(d))}</span>
+        <span class="model">${escapeHtml(displayName(d))}</span>
         <span class="status ${status}"><span class="dot"></span>${STATUS_LABEL[status] || status}</span>
       </div>
       <div class="meta">${meta}</div>
       <div class="row">
-        <code class="url">${url}</code>
-        <button class="btn btn-ghost" onclick="event.stopPropagation();copyUrl('${d.endpoint || ""}')">Copy</button>
+        <code class="url">${escapeHtml(url)}</code>
+        <button class="btn btn-ghost" onclick="event.stopPropagation();copyUrl(publicBaseUrl())" aria-label="Copy API base URL">Copy API URL</button>
       </div>
       ${err}
       ${stage}
@@ -1067,7 +1143,7 @@ function renderDetailMetrics(d) {
   const st = document.getElementById("detailStatus");
   st.className = `status ${d.status}`;
   st.innerHTML = `<span class="dot"></span>${STATUS_LABEL[d.status] || d.status}`;
-  document.getElementById("detailUrl").textContent = displayUrl(d);
+  document.getElementById("detailUrl").textContent = publicBaseUrl();
 
   const m = d.metrics;
   if (!m || d.status !== "healthy") {
@@ -1548,7 +1624,18 @@ async function uninstallApp() {
     <p class="muted">To install it again, run the install command from the SursumAI site.</p></div>`;
 }
 
+const WORKSPACE_PAGES = {
+  deploys: ["Your models", "Deploy, monitor and connect your models from one place."],
+  pools: ["Model pools", "Group models and choose how each request is routed."],
+  chat: ["Playground", "Try your models and pools before connecting your application."],
+  keys: ["API access", "Create a key and connect through one OpenAI-compatible endpoint."],
+  settings: ["Settings", "Manage this installation and the runtimes available on your machine."],
+};
+
 function switchDash(view) {
+  const page = WORKSPACE_PAGES[view] || ["Machines", "Manage the machines connected to your workspace."];
+  document.getElementById("workspaceTitle").textContent = page[0];
+  document.getElementById("workspaceDescription").textContent = page[1];
   document.querySelectorAll(".dash-tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.view === view));
   document.getElementById("deploysView").classList.toggle("hidden", view !== "deploys");

@@ -286,6 +286,46 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
   com o caminho do template). Não oferecer isso como opção. O que funciona é o
   `enable_thinking:false` + `/no_think` que o central já traduz.
 - **API 100% default**: não mexer no thinking do modelo — sem `enable_thinking:false`. Reasoning conta em `completion_tokens` (verificado empiricamente). Um modelo pode gastar todo o contexto em reasoning (`content` vazio, `finish:length`) — aceito.
+- **Erro de `/v1` é `error.message`; erro de gerenciamento é `detail`.** Um
+  cliente OpenAI lê `error.message`, e o FastAPI escreve `{"detail": …}` — então
+  toda recusa que este projeto escreveu com cuidado ("model not ready:
+  provisioning", "no pool named X") chegava ao SDK como exceção de mensagem
+  **vazia**, e quem chamava tinha que imprimir o corpo cru para saber algo. Os
+  handlers em `central/app.py` reescrevem o formato **só sob `/v1`**: o
+  `web/app.js` lê `data.detail` em toda chamada de gerenciamento, e reescrever
+  tudo apagaria toda mensagem de erro do dashboard. Registrado na
+  `StarletteHTTPException`, não na do FastAPI, para pegar também o 404/405 que o
+  roteador levanta antes de qualquer handler. O 401 de `/v1` ainda não manda
+  `WWW-Authenticate` (o `_api_user` levanta a própria exceção em vez de deixar o
+  `HTTPBearer` fazer); o handler repassa o header quando existe.
+- **Nível de log e teto do log de deploy em `core/logs.py`.** Nada no projeto
+  chamava `logging.basicConfig`, o que tornava todo `log.debug` do código
+  inalcançável — não havia como perguntar a uma máquina o que ela estava
+  fazendo. `SURSUMAI_LOG` (padrão `info`) é esse jeito, e `setup()` é idempotente
+  porque `uvicorn --reload` importa o app duas vezes e dois handlers na raiz
+  imprimem tudo em dobro. O `metrics` tem poda e índice; `sursumai-logs/<id>.log`
+  não tinha nada, e runtime falante escrevendo por semanas enche o disco da
+  máquina que ele serve. `trim()` corta **no lugar** (nunca renomeia: o runtime
+  mantém o fd aberto em modo append, que escreve no fim do *inode*, então um
+  rename deixaria o processo escrevendo num arquivo que ninguém lê), guarda a
+  metade mais nova, nunca começa no meio de uma linha, e é chamado no
+  `_log_size()` do agent — o poll de 10 s do central, que já fazia `stat` nesse
+  arquivo. O corte faz `log_bytes` **cair**, e o central observa `(stage,
+  log_bytes)` procurando *mudança*, não crescimento, então log cortado nunca
+  parece deploy travado. Teto por `SURSUMAI_LOG_MAX_MB` (64).
+- **O proxy do web responde erro em JSON, e fecha a conexão ao recusar.** O 502
+  era a string crua `backend unreachable: …` sob `Content-Type:
+  application/json`; o `app.js` faz `res.json()`, que estoura, e o catch
+  trocava o motivo que o proxy já sabia por um "could not connect" genérico.
+  `_json_error` manda `detail` **e** `error`, para os dois leitores. Timeout do
+  `urlopen` é `TimeoutError`, que não é `HTTPError` nem `URLError` e escapava de
+  todos os `except` (traceback, socket derrubado, nenhum status) — agora é 504,
+  e um `OSError` solto é 502. `Content-Length` malformado é 400 e corpo acima de
+  `SURSUMAI_MAX_BODY_MB` (32) é 413, **recusado pela declaração, sem ler os
+  bytes** — em loopback não é nada, mas `SURSUMAI_BIND` põe essa porta na rede.
+  Recusa sem drenar o corpo **tem que fechar a conexão**: os bytes não lidos
+  ficam no socket e o keep-alive os lê como requisição nova, então o cliente
+  recebia nosso 413 seguido de um 400 falso.
 - **Timeout de chat é `SURSUMAI_CHAT_TIMEOUT` (900 s)**, não 180: modelo que raciocina num notebook pensa por minutos, e o timeout antigo cortava e dizia "unreachable" com o modelo vivo. Timeout diz que o modelo está demorando; só conexão recusada diz unreachable. O juiz do router tem `JUDGE_MAX_TOKENS = 1024` pelo mesmo motivo — com 120 um juiz que pensa devolvia veredito vazio e o router nunca escalava. Preflight de porta espera até `SURSUMAI_PORT_WAIT` (90 s) por uma porta recém-liberada (o Docker Desktop leva 30 s+).
 - **URL que o usuário copia é sempre absoluta e sempre `/v1`.** `API` (`"/api"`) é relativo e só funciona dentro da página, pelo proxy do web; snippets, Base URL e o curl do Playground usam `publicBaseUrl()` (`http://<host>:8001/v1`). Um snippet com `base_url="/api/v1"` quebrou no primeiro `python`, e o curl de modelo apontava para `/deploys/{id}/chat` — rota de gerenciamento que recusa API key com 403.
 - Resposta direta de um deploy volta com `model` = `spec.model`: o llama-server devolve o caminho do GGUF no container (`/models/…gguf`). Vale para resposta normal e streaming (`_relabel_upstream` com `session_id=None`).

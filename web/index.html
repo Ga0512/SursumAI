@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SursumAI - Self-Hosting Models</title>
+  <title>SursumAI | Model workspace</title>
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -12,21 +12,22 @@
 
   <!-- ======= LOGIN ======= -->
   <section id="login" class="auth-wrap">
-    <div class="auth-card glass">
+    <form class="auth-card glass" onsubmit="event.preventDefault();submitAuth()">
       <div class="auth-brand"><svg class="logo-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><rect width="800" height="800" fill="#070228"/><g fill="#fff"><rect x="208" y="130" width="404" height="105" rx="36"/><rect x="208" y="130" width="118" height="238" rx="36"/><rect x="340" y="368" width="120" height="105" rx="22"/><rect x="496" y="474" width="118" height="238" rx="36"/><rect x="208" y="606" width="406" height="106" rx="36"/></g></svg><span>SursumAI</span></div>
       <h2 id="authTitle">Welcome back</h2>
-      <p id="authSub">Sign in to manage your deployments</p>
+      <p id="authSub">Sign in to your model workspace.</p>
+      <p class="auth-local-note">Your account and models are managed by this SursumAI installation.</p>
       <div class="field">
-        <label>Email</label>
+        <label for="auth_email">Email</label>
         <input id="auth_email" class="input" type="email" autocomplete="email" placeholder="you@example.com" />
       </div>
       <div class="field">
-        <label>Password</label>
+        <label for="auth_password">Password</label>
         <input id="auth_password" class="input" type="password" autocomplete="current-password" placeholder="••••••••" />
       </div>
-      <button id="authBtn" class="btn btn-primary" style="width:100%" onclick="submitAuth()">Sign in</button>
-      <button id="authToggle" class="btn btn-ghost" style="width:100%" onclick="toggleAuth()">Create account</button>
-    </div>
+      <button id="authBtn" type="submit" class="btn btn-primary" style="width:100%">Sign in</button>
+      <button id="authToggle" type="button" class="btn btn-ghost" style="width:100%" onclick="toggleAuth()">Create account</button>
+    </form>
   </section>
 
   <!-- ======= DASHBOARD ======= -->
@@ -44,6 +45,14 @@
         <span id="updateBannerText"></span>
         <button class="btn btn-primary update-btn" onclick="applyUpdate()">Update now</button>
       </div>
+      <header class="workspace-head">
+        <div>
+          <span class="eyebrow">WORKSPACE</span>
+          <h1 id="workspaceTitle">Your models</h1>
+          <p id="workspaceDescription">Deploy, monitor and connect your models from one place.</p>
+        </div>
+        <span class="workspace-label">Self-hosted inference</span>
+      </header>
       <div class="dash-head">
         <div class="dash-tabs">
           <button class="dash-tab active" data-view="deploys" onclick="switchDash('deploys')">Deployments</button>
@@ -54,11 +63,19 @@
         </div>
         <div>
           <button class="btn btn-primary hidden" id="poolBtn" onclick="openPoolModal()">+ New pool</button>
-          <button class="btn btn-primary" id="newBtn" onclick="openModal()">+ New</button>
+          <button class="btn btn-primary" id="newBtn" onclick="openModal()">Deploy model</button>
         </div>
       </div>
       <div id="deploysView">
-        <div id="sursumaiGrid" class="sursum-grid"></div>
+        <div id="deployConnection" class="connection-notice hidden" role="status"></div>
+        <div class="workspace-summary" aria-label="Deployment overview">
+          <div><span>Total models</span><strong id="summaryTotal">&mdash;</strong></div>
+          <div><span>Ready to use</span><strong id="summaryReady">&mdash;</strong></div>
+          <div><span>In progress</span><strong id="summaryStarting">&mdash;</strong></div>
+          <div><span>Needs attention</span><strong id="summaryFailed">&mdash;</strong></div>
+        </div>
+        <div class="section-heading"><h2>Deployments</h2><span id="deployFreshness">Connecting to your workspace...</span></div>
+        <div id="sursumaiGrid" class="sursum-grid"><div class="empty glass"><span class="orb" data-state="checking"></span><h3>Loading your models</h3><p>Checking the latest deployment status.</p></div></div>
       </div>
       <div id="poolsView" class="hidden">
         <div id="poolsGrid" class="sursum-grid"></div>
@@ -152,7 +169,7 @@
       <div class="modal-head">
         <div>
           <h3 id="modalTitle">New deployment</h3>
-          <p class="modal-sub" id="modalSub">Provision a self-hosted model on your infrastructure.</p>
+          <p class="modal-sub" id="modalSub">Choose a model. We will check your machine and prepare it for you.</p>
         </div>
         <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
       </div>
@@ -370,7 +387,7 @@
     </div>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- ======= DEPLOY DETAIL MODAL ======= -->
   <div id="detailModal" class="overlay hidden" onclick="if(event.target===this) closeDetail()">
