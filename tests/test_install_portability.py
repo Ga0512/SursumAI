@@ -77,7 +77,7 @@ def test_the_command_does_not_depend_on_the_system_python():
 def test_the_launcher_passes_the_arguments_through():
     text = (ROOT / "install.sh").read_text(encoding="utf-8")
     launcher = text[text.index("cat > \"$BIN_DIR/sursumai\""):text.index("LAUNCHER\nchmod")]
-    assert '"\$@"' in launcher, "without $@ the launcher swallows `status`, `update`…"
+    assert r'"\$@"' in launcher, "without $@ the launcher swallows `status`, `update`…"
 
 
 def test_the_old_symlink_is_removed_before_the_launcher_is_written():
@@ -95,3 +95,64 @@ def test_the_cli_script_is_still_python():
     script = (ROOT / "sursumai" / "bin" / "sursumai").read_text(encoding="utf-8")
     assert script.startswith("#!/usr/bin/env python3")
     assert "exec \"" not in script.splitlines()[1]
+
+
+# ---- the checksum the installer could never find ----
+
+SHA = "bd4ce4cc872c4a64a348e068d98e61b1ca3f2746b02af06b5287176af61f587f"
+
+
+def _published_sha_lookup(sha256sums: str, asset: str) -> str:
+    """Run the installer's OWN SHA256SUMS parser over a given file.
+
+    The awk program is lifted out of install.sh rather than reimplemented
+    here: a copy would keep passing while the shipped script failed, which is
+    precisely the bug this guards against.
+    """
+    import re
+    import shutil
+    import subprocess
+
+    if not shutil.which("awk"):
+        pytest.skip("no awk on this machine")
+    text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    match = re.search(r"awk -v a=\"\$SURSUMAI_ASSET\" '(.+?)'", text, re.S)
+    assert match, "the SHA256SUMS parser is no longer where this test looks"
+    done = subprocess.run(["awk", "-v", f"a={asset}", match.group(1)],
+                          input=sha256sums, capture_output=True, text=True)
+    return done.stdout.strip()
+
+
+def test_the_binary_mode_format_is_read():
+    """What every release actually published.
+
+    `sha256sum -b` writes "<sha> *<name>", and the parser used to be
+    `grep -F " $SURSUMAI_ASSET"` — a space followed by the name, which never
+    matches a line where the space is followed by an asterisk. So `expected`
+    stayed empty, the installer announced "no published checksum" and went on
+    to install UNVERIFIED, on every release that shipped a SHA256SUMS. It hid
+    for so long because a checksum that cannot be found is indistinguishable
+    from one that was never published.
+    """
+    line = SHA + " *sursumai-1.0.27.tar.gz\n"
+    assert _published_sha_lookup(line, "sursumai-1.0.27.tar.gz") == SHA
+
+
+def test_the_text_mode_format_is_read():
+    """What plain `sha256sum` writes: two spaces, no asterisk."""
+    line = SHA + "  sursumai-1.0.27.tar.gz\n"
+    assert _published_sha_lookup(line, "sursumai-1.0.27.tar.gz") == SHA
+
+
+def test_a_different_assets_line_is_not_taken():
+    """A release may publish more than one file. Reading the wrong line would
+    abort every install with a mismatch instead of verifying anything."""
+    body = (SHA + "  sursumai-1.0.26.tar.gz\n"
+            + "0" * 64 + "  other.zip\n")
+    assert _published_sha_lookup(body, "sursumai-1.0.27.tar.gz") == ""
+
+
+def test_the_right_line_is_found_among_others():
+    body = ("1" * 64 + "  other.zip\n"
+            + SHA + " *sursumai-1.0.27.tar.gz\n")
+    assert _published_sha_lookup(body, "sursumai-1.0.27.tar.gz") == SHA

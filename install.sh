@@ -114,8 +114,18 @@ verify_checksum() {
   local file="$1" expected="$SURSUMAI_SHA256" actual
 
   if [ -z "$expected" ] && [ -n "$SURSUMAI_SHA256_URL" ]; then
-    # SHA256SUMS is "<sha>  <filename>" lines; take the one for our asset
-    expected="$(curl -fsSL "$SURSUMAI_SHA256_URL" 2>/dev/null       | grep -F " $SURSUMAI_ASSET" | head -1 | cut -d" " -f1 || true)"
+    # SHA256SUMS lines name the file in one of two ways, and BOTH have to be
+    # read here: `sha256sum` writes "<sha>  <name>" (two spaces, text mode)
+    # and `sha256sum -b` writes "<sha> *<name>" (space, asterisk, binary).
+    # The published files used the second one while this grep looked for a
+    # space followed by the name, so it never matched: `expected` stayed
+    # empty, the branch below said "no published checksum" and the install
+    # continued UNVERIFIED on every release that shipped a SHA256SUMS. The
+    # mismatch is silent by construction — a checksum that cannot be found
+    # looks exactly like a checksum that was never published.
+    expected="$(curl -fsSL "$SURSUMAI_SHA256_URL" 2>/dev/null \
+      | awk -v a="$SURSUMAI_ASSET" '{ n = $2; sub(/^\*/, "", n); if (n == a) { print $1; exit } }' \
+      || true)"
   fi
   if [ -z "$expected" ]; then
     warn "no published checksum for $SURSUMAI_VERSION — cannot verify the download."
