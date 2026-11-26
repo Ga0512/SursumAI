@@ -27,12 +27,16 @@ from core import ports
 from core.spec import Spec, SpecError
 from . import agent_client
 from . import auth as authmod
+from . import ratelimit
 from . import router as router_mod
 from .db import DeployState, Pool, RouterSession, Store
 
 log = logging.getLogger("sursumai.central")
 
 store = Store()
+
+# off on loopback, on when SURSUMAI_BIND exposes the port: see ratelimit.py
+limiter = ratelimit.Limiter()
 
 
 class ProHooks:
@@ -115,7 +119,10 @@ app = FastAPI(title="SursumAI Central", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    # read from one place, and it follows SURSUMAI_BIND and the configured web
+    # port: the pair hardcoded here served nobody once the dashboard moved to
+    # a LAN address, and a client's own front-end had no way in at all
+    allow_origins=ports.cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -405,11 +412,36 @@ def _api_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)):
         user = store.get_user_by_api_key(creds.credentials)
         if user is None:
             raise HTTPException(status_code=401, detail="invalid or revoked API key")
+        _rate_check(creds.credentials)
         return user
     user = store.get_user_by_token(creds.credentials)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid or expired token")
+    _rate_check(creds.credentials)
     return user
+
+
+def _rate_check(credential: str) -> None:
+    """The ceiling on /v1, counted per credential.
+
+    Checked after the credential is known to be valid, so a wrong key cannot
+    use up a real one's allowance, and here rather than per route because
+    every /v1 endpoint depends on `_api_user` — one choke point instead of a
+    decorator somebody forgets.
+
+    The bucket is keyed by the same one-way digest the database stores, never
+    the key itself: this structure lives in memory for the life of the
+    process, and a plaintext key in it would be one more place to leak from.
+    """
+    wait = limiter.check(authmod.hash_token(credential))
+    if wait <= 0:
+        return
+    raise HTTPException(
+        status_code=429,
+        detail=(f"rate limit of {limiter.limit} requests per minute reached — "
+                f"retry in {wait:.0f}s, or raise SURSUMAI_RATE_LIMIT"),
+        headers={"Retry-After": str(max(int(wait + 0.5), 1))},
+    )
 
 
 # Advanced numbers where 0 means "back to automatic". Without this a redeploy
@@ -1058,6 +1090,20 @@ async def get_logs(deploy_id: str, tail: int = 300, user=Depends(_current_user))
     except agent_client.AgentError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return {"logs": content}
+
+
+@app.get("/deploys/{deploy_id}/events")
+async def get_events(deploy_id: str, limit: int = 100, user=Depends(_current_user)):
+    """What happened to this deploy, newest first.
+
+    Logs are the runtime's output and live on the machine; this is the
+    deploy's own history, and it survives the log being trimmed, the agent
+    restarting and the container being replaced. It answers the question a
+    single overwritten `error` column never could: not "what is wrong now"
+    but "what happened at 3am".
+    """
+    _get_owned_deploy(deploy_id, user.id)      # 404 unless it is theirs
+    return {"events": store.list_events(deploy_id, min(max(limit, 1), 500))}
 
 
 @app.post("/deploys/{deploy_id}/chat")

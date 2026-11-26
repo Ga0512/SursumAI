@@ -114,6 +114,37 @@ def first_free(taken: set[int]) -> int:
     )
 
 
+def cors_origins() -> list[str]:
+    """Browser origins allowed to call the central directly.
+
+    The dashboard never needs this: every call it makes goes to `/api` on its
+    own origin, through the web proxy, and `publicBaseUrl()` is only ever
+    shown as text. So this list exists for the other case — the client's own
+    front-end calling `/v1` from a browser — and the hardcoded
+    `localhost:3000` pair served nobody once `SURSUMAI_BIND` moved the
+    dashboard to a LAN address.
+
+    `SURSUMAI_CORS_ORIGINS` is a comma-separated list, or `*` for any origin.
+    `*` is not the hole it looks like here: this API authenticates with a
+    bearer token, never a cookie, so a hostile page cannot make an
+    authenticated request — it has no way to read the key out of another
+    origin's localStorage. It would be a hole if auth were cookie-based.
+    """
+    raw = os.environ.get("SURSUMAI_CORS_ORIGINS", "").strip()
+    if raw == "*":
+        return ["*"]
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    origins = [f"http://localhost:{WEB_PORT}", f"http://127.0.0.1:{WEB_PORT}"]
+    host = os.environ.get("SURSUMAI_BIND", "").strip()
+    # the bound address is where the dashboard is actually reachable; 0.0.0.0
+    # means every interface, which is not an origin a browser can ever send,
+    # so there is nothing to add for it
+    if host and host not in ("127.0.0.1", "localhost", "0.0.0.0", "::"):
+        origins.append(f"http://{host}:{WEB_PORT}")
+    return origins
+
+
 def bind_host() -> str:
     """Interface a model server should listen on.
 

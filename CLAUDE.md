@@ -326,6 +326,59 @@ Os 3 processos **e as portas dos deploys (9000-9099)** escutam em `127.0.0.1`. E
   Recusa sem drenar o corpo **tem que fechar a conexão**: os bytes não lidos
   ficam no socket e o keep-alive os lê como requisição nova, então o cliente
   recebia nosso 413 seguido de um 400 falso.
+- **O serviço é um comando, não parte do instalador.** Nada mantinha o SursumAI
+  de pé: reboot derrubava, crash derrubava, e o `sursumai update` para os três
+  processos e termina mandando você subir de novo — então a API ficava fora do
+  update até alguém notar. `sursumai service install` resolve, com **launchd no
+  macOS e systemd de usuário no Linux**, nos dois casos no nível do usuário (sem
+  sudo, nada fora do `$HOME`). Fora do `install.sh` de propósito: o instalador é
+  o único arquivo aqui que quebra instalação de todo mundo, launchd e systemd não
+  se testam da mesma máquina, e serviço é decisão sobre o host. **Três units, uma
+  por processo** — supervisor supervisiona um processo, e uma unit que sobe três e
+  sai te dá "sobrevive a reboot" mas nunca percebe crash. `_service_commands()` é
+  a fonte única de como os três sobem, lida pelo CLI e pelo serviço: arquivo de
+  serviço que divergiu do CLI funciona até o dia em que ele é o único a subir as
+  coisas. A configuração é gravada na unit (é o ponto: `SURSUMAI_BIND` como
+  `export` numa shell é como uma instalação exposta volta calada para loopback
+  depois do reboot), mas **segredo nunca** — qualquer variável com `KEY`, `TOKEN`,
+  `SECRET` ou `PASSWORD` no nome é descartada, e o `AGENT_KEY` continua só no
+  `~/.sursumai/agent.key`. No Linux, sem `loginctl enable-linger` a unit de
+  usuário morre no logout, e o comando avisa.
+- **Histórico do deploy em `deploy_events`.** O deploy tinha **uma** coluna
+  `error`, sobrescrita em cada transição, então "por que isso virou `failed` às
+  3h e voltou às 3h02" não tinha resposta em lugar nenhum — o router já guardava
+  cada decisão em `router_log` enquanto o deploy, que é o objeto mais importante,
+  não guardava nada. Log não resolve: é saída do runtime, vive na máquina e agora
+  é cortado. Gravado no `Store.update()`, que é por onde toda transição passa, e
+  **só quando `(status, error)` mudou** — o reconcile chama `update` sem mudar
+  nada, e uma linha por passada enterraria as transições reais. Começa no
+  nascimento, para a primeira linha responder "quando isso foi pedido". Poda por
+  `EVENTS_KEEP` (200) pela mesma razão do `METRICS_KEEP`, e índice em
+  `(deploy_id, created_at DESC)`. Exposto em `GET /deploys/{id}/events`, com
+  sessão e dono — API key recebe 403, igual ao resto do gerenciamento.
+- **Teto por credencial no `/v1`, que acompanha a exposição.** A chave da conta
+  era a única coisa na frente dos modelos e nada contava quantas vezes era usada,
+  então chave vazada em script, histórico de git ou log de chat era inferência de
+  graça para quem achasse. O limite **não** tem número fixo para todo mundo:
+  desligado em loopback, `SURSUMAI_RATE_LIMIT` ou 120/min quando o
+  `SURSUMAI_BIND` abre a porta. Ligar para toda instalação quebraria o que este
+  arquivo documenta como normal — quatro documentos em paralelo, um bench — por
+  um risco que instalação em loopback não tem. Checado no `_api_user`, **depois**
+  de a credencial ser válida (senão qualquer um gasta o limite de outro chutando
+  chaves) e lá em vez de rota por rota porque todo `/v1` depende dele. O balde é
+  indexado pelo mesmo digest que o banco guarda, nunca pela chave em texto. Em
+  memória de propósito: o central é um processo, e uma linha por requisição seria
+  problema pior que o resolvido. Janela deslizante, não minuto fixo — bucket fixo
+  deixa passar o dobro na virada.
+- **CORS sai do `core/ports.py` e segue o bind.** Era o par `localhost:3000`
+  escrito à mão, que não servia ninguém depois que o `SURSUMAI_BIND` move o
+  dashboard para um endereço de rede — e o front do cliente não tinha entrada
+  nenhuma. O dashboard nunca precisou disso: todo `fetch` dele vai para `/api` na
+  própria origem, pelo proxy, e o `publicBaseUrl()` só é exibido como texto.
+  `SURSUMAI_CORS_ORIGINS` aceita lista separada por vírgula ou `*`; o `*` não é o
+  buraco que parece **aqui** porque esta API autentica por bearer e nunca por
+  cookie, então página hostil não consegue ler a chave do localStorage de outra
+  origem. Seria buraco se a autenticação fosse por cookie.
 - **Timeout de chat é `SURSUMAI_CHAT_TIMEOUT` (900 s)**, não 180: modelo que raciocina num notebook pensa por minutos, e o timeout antigo cortava e dizia "unreachable" com o modelo vivo. Timeout diz que o modelo está demorando; só conexão recusada diz unreachable. O juiz do router tem `JUDGE_MAX_TOKENS = 1024` pelo mesmo motivo — com 120 um juiz que pensa devolvia veredito vazio e o router nunca escalava. Preflight de porta espera até `SURSUMAI_PORT_WAIT` (90 s) por uma porta recém-liberada (o Docker Desktop leva 30 s+).
 - **URL que o usuário copia é sempre absoluta e sempre `/v1`.** `API` (`"/api"`) é relativo e só funciona dentro da página, pelo proxy do web; snippets, Base URL e o curl do Playground usam `publicBaseUrl()` (`http://<host>:8001/v1`). Um snippet com `base_url="/api/v1"` quebrou no primeiro `python`, e o curl de modelo apontava para `/deploys/{id}/chat` — rota de gerenciamento que recusa API key com 403.
 - Resposta direta de um deploy volta com `model` = `spec.model`: o llama-server devolve o caminho do GGUF no container (`/models/…gguf`). Vale para resposta normal e streaming (`_relabel_upstream` com `session_id=None`).

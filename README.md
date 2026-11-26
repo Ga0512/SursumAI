@@ -109,6 +109,7 @@ sursumai status   # are the services running?
 sursumai restart  # stop and start the services
 sursumai stop     # stop the services (running model deployments stay up)
 sursumai update   # update to the latest release
+sursumai service  # keep it running across crashes and reboots
 sursumai uninstall  # remove SursumAI from this computer
 ```
 
@@ -125,6 +126,31 @@ SURSUMAI_WEB_PORT=80 SURSUMAI_CENTRAL_PORT=8080 sursumai
 
 `SURSUMAI_BIND=0.0.0.0` makes it reachable from your network instead of this
 machine only. The Base URL shown in the dashboard follows whatever you chose.
+
+Once anything depends on it, let the machine keep it running:
+
+```bash
+sursumai service install    # launchd on macOS, systemd --user on Linux
+sursumai service status
+sursumai service uninstall
+```
+
+It starts at boot and restarts if a process dies. The settings in effect when
+you install are written into the service, so an exposed install does not
+quietly fall back to loopback after a reboot — an `export` only lives in the
+shell that ran it. Secrets are never written there: the agent key stays in
+`~/.sursumai/agent.key`.
+
+On a Linux server also run `sudo loginctl enable-linger $USER`, or the service
+stops when you log out. The command tells you if that is missing.
+
+Exposing the API turns on a per-key limit of 120 requests a minute, because
+from that point the key is the only thing in front of your GPU. Set
+`SURSUMAI_RATE_LIMIT` to another number, or `0` if something in front of
+SursumAI already does this. On loopback there is no limit.
+
+For a browser app of your own calling the API, name its origin:
+`SURSUMAI_CORS_ORIGINS=https://app.example.com`.
 
 To remove it without a terminal: **Settings → Uninstall** in the dashboard. It
 stops your models and deletes the app, its database and the downloaded models.

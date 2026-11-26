@@ -902,3 +902,61 @@ def test_management_validation_errors_keep_the_detail_list(client):
     resp = client.post("/pools", json={"name": 5}, headers=_auth(token))
     assert resp.status_code == 422
     assert isinstance(resp.json()["detail"], list)
+
+
+# ---- the ceiling per credential ----
+
+def test_a_key_over_its_limit_gets_a_429_it_can_act_on(client, monkeypatch):
+    """A leaked key was free inference: the key was the only thing in front
+    of the models and nothing counted how often it was used."""
+    from central import ratelimit
+
+    monkeypatch.setattr(central_app, "limiter", ratelimit.Limiter(limit=2))
+    token = _register(client)
+    key = _api_key(client, token)["key"]
+    assert client.get("/v1/models", headers=_auth(key)).status_code == 200
+    assert client.get("/v1/models", headers=_auth(key)).status_code == 200
+    resp = client.get("/v1/models", headers=_auth(key))
+    assert resp.status_code == 429
+    # an OpenAI client branches on this, and retries on the header
+    assert resp.json()["error"]["type"] == "rate_limit_error"
+    assert int(resp.headers["retry-after"]) >= 1
+
+
+def test_the_limit_is_per_credential_not_per_account(client, monkeypatch):
+    """Revoking one noisy key must not be the only way to get service back,
+    and one script must not be able to starve another."""
+    from central import ratelimit
+
+    monkeypatch.setattr(central_app, "limiter", ratelimit.Limiter(limit=1))
+    token = _register(client)
+    first = _api_key(client, token, name="one")["key"]
+    second = _api_key(client, token, name="two")["key"]
+    assert client.get("/v1/models", headers=_auth(first)).status_code == 200
+    assert client.get("/v1/models", headers=_auth(first)).status_code == 429
+    assert client.get("/v1/models", headers=_auth(second)).status_code == 200
+
+
+def test_a_rejected_key_does_not_spend_a_real_ones_allowance(client, monkeypatch):
+    """The check runs after the credential is known to be valid. Otherwise
+    anyone could exhaust a limit by guessing keys they do not have."""
+    from central import ratelimit
+
+    monkeypatch.setattr(central_app, "limiter", ratelimit.Limiter(limit=1))
+    token = _register(client)
+    key = _api_key(client, token)["key"]
+    for _ in range(5):
+        assert client.get("/v1/models",
+                          headers=_auth("sk-sursum-not-a-real-key")).status_code == 401
+    assert client.get("/v1/models", headers=_auth(key)).status_code == 200
+
+
+def test_management_routes_are_not_rate_limited(client, monkeypatch):
+    """The dashboard polls /deploys every five seconds. A ceiling meant for
+    inference must not log the user out of their own machine."""
+    from central import ratelimit
+
+    monkeypatch.setattr(central_app, "limiter", ratelimit.Limiter(limit=1))
+    token = _register(client)
+    for _ in range(10):
+        assert client.get("/deploys", headers=_auth(token)).status_code == 200

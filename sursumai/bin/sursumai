@@ -19,6 +19,7 @@ Commands:
   sursumai pools         table of pools
   sursumai destroy <id> [--yes]
   sursumai update [--yes] [--version vX.Y.Z]
+  sursumai service [install|uninstall|status]   run it as a service
   sursumai uninstall [--yes]
 
 Every command exits non-zero on failure, and prints a human sentence rather
@@ -212,8 +213,29 @@ def _down() -> list[str]:
     return [n for n, i in PORT_INFO.items() if not _port_open(i["port"])]
 
 
+def _venv_python() -> Path:
+    return SURSUMAI_ROOT / ".venv" / "bin" / "python"
+
+
+def _service_commands() -> dict[str, list[str]]:
+    """How each of the three processes is started, in one place.
+
+    `sursumai` and `sursumai service` both read this. A service file that
+    drifts from how the CLI actually starts things is the worst kind of bug
+    here: it works until the day it is the only thing starting them.
+    """
+    py = str(_venv_python())
+    return {
+        "agent": [py, "-m", "uvicorn", "agent.app:app",
+                  "--host", BIND, "--port", str(AGENT_PORT)],
+        "central": [py, "-m", "uvicorn", "central.app:app",
+                    "--host", BIND, "--port", str(CENTRAL_PORT)],
+        "web": [py, "web/server.py", "--port", str(WEB_PORT), "--host", BIND],
+    }
+
+
 def _start_processes() -> None:
-    py = SURSUMAI_ROOT / ".venv" / "bin" / "python"
+    py = _venv_python()
     if not py.exists():
         print("first run — preparing the environment…")
         result = subprocess.run(["bash", str(SURSUMAI_ROOT / "setup.sh")])
@@ -229,13 +251,7 @@ def _start_processes() -> None:
         cmd_stop(argparse.Namespace())
     env = {**os.environ, "AGENT_URL": AGENT_URL, "SURSUMAI_BIND": BIND}
 
-    commands = {
-        "agent": [str(py), "-m", "uvicorn", "agent.app:app",
-                  "--host", BIND, "--port", str(AGENT_PORT)],
-        "central": [str(py), "-m", "uvicorn", "central.app:app",
-                    "--host", BIND, "--port", str(CENTRAL_PORT)],
-        "web": [str(py), "web/server.py", "--port", str(WEB_PORT), "--host", BIND],
-    }
+    commands = _service_commands()
     for name, info in PORT_INFO.items():
         if _port_open(info["port"]):
             continue
@@ -312,6 +328,236 @@ def cmd_restart(args: argparse.Namespace) -> None:
 
 def cmd_version(args: argparse.Namespace) -> None:
     print(f"sursumai {_local_version()}")
+
+
+# ---------- running as a service ----------
+#
+# Nothing kept SursumAI running. A reboot stopped it, a crash stopped it, and
+# `sursumai update` stops the three processes and ends by telling you to start
+# them again — so the API was down from the update until somebody noticed. For
+# anything anyone depends on, that is the first thing to fix.
+#
+# Deliberately NOT part of install.sh: the installer is the one file here that
+# can break an install for everybody, launchd and systemd cannot be tested
+# from the same machine, and a service is a decision about the host, not
+# something to do to someone silently. It is a command you run on purpose.
+#
+# User-level on both platforms, so there is no sudo and nothing lands outside
+# $HOME. Three units, one per process, because a supervisor supervises one
+# process: a single unit that starts three and exits gets you "survives a
+# reboot" but not "comes back after a crash", which is half the point.
+
+SERVICE_LABEL = "com.sursumai"
+# Config is baked into the unit, which is exactly the point: SURSUMAI_BIND as
+# an `export` in one shell is how an exposed install silently goes back to
+# loopback after a reboot. Secrets are not: AGENT_KEY lives in
+# ~/.sursumai/agent.key at 0600 and is read from there, and writing it into a
+# unit file would be a second copy for no reason.
+_SECRET_HINTS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+
+
+def _service_env() -> dict[str, str]:
+    """The SURSUMAI_* configuration this machine is currently running with."""
+    env = {"SURSUMAI_BIND": BIND, "AGENT_URL": AGENT_URL}
+    for name, value in os.environ.items():
+        if not name.startswith("SURSUMAI_") or not value:
+            continue
+        if any(hint in name.upper() for hint in _SECRET_HINTS):
+            continue
+        env[name] = value
+    return env
+
+
+def _is_mac() -> bool:
+    return sys.platform == "darwin"
+
+
+def _launchd_dir() -> Path:
+    return Path.home() / "Library" / "LaunchAgents"
+
+
+def _systemd_dir() -> Path:
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def _plist(name: str, command: list[str], env: dict[str, str]) -> str:
+    def esc(text: str) -> str:
+        return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    args = "\n".join(f"      <string>{esc(a)}</string>" for a in command)
+    variables = "\n".join(f"      <key>{esc(k)}</key><string>{esc(v)}</string>"
+                          for k, v in sorted(env.items()))
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key><string>{SERVICE_LABEL}.{name}</string>
+    <key>ProgramArguments</key>
+    <array>
+{args}
+    </array>
+    <key>WorkingDirectory</key><string>{esc(str(SURSUMAI_ROOT))}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+{variables}
+    </dict>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>{esc(str(LOG_DIR / f"{name}.log"))}</string>
+    <key>StandardErrorPath</key><string>{esc(str(LOG_DIR / f"{name}.log"))}</string>
+  </dict>
+</plist>
+"""
+
+
+def _unit(name: str, command: list[str], env: dict[str, str]) -> str:
+    import shlex
+
+    environment = "\n".join(f"Environment={k}={v}" for k, v in sorted(env.items()))
+    # After= is ordering only, not a dependency: all three retry, and a hard
+    # requirement would mean one failing unit keeps the others down
+    after = "After=sursumai-agent.service" if name == "central" else ""
+    return f"""[Unit]
+Description=SursumAI {name}
+{after}
+
+[Service]
+Type=simple
+WorkingDirectory={SURSUMAI_ROOT}
+{environment}
+ExecStart={shlex.join(command)}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def _run(cmd: list[str], check: bool = False) -> subprocess.CompletedProcess:
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    if check and done.returncode != 0:
+        raise CliError(f"`{' '.join(cmd)}` failed: "
+                       f"{(done.stderr or done.stdout).strip() or done.returncode}")
+    return done
+
+
+def _service_install() -> None:
+    if sys.platform == "win32":
+        raise CliError("run this inside WSL, not Windows — the services are Linux processes")
+    if not _venv_python().exists():
+        raise CliError("run `sursumai` once first, so the environment exists")
+    env = _service_env()
+    commands = _service_commands()
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    if _is_mac():
+        target = _launchd_dir()
+        target.mkdir(parents=True, exist_ok=True)
+        for name, command in commands.items():
+            path = target / f"{SERVICE_LABEL}.{name}.plist"
+            path.write_text(_plist(name, command, env), encoding="utf-8")
+            path.chmod(0o600)
+            label = f"{SERVICE_LABEL}.{name}"
+            domain = f"gui/{os.getuid()}"
+            # bootout first so a reinstall replaces the running job instead of
+            # failing with "service already loaded"
+            _run(["launchctl", "bootout", f"{domain}/{label}"])
+            done = _run(["launchctl", "bootstrap", domain, str(path)])
+            if done.returncode != 0:
+                # bootstrap/bootout is the modern pair; older macOS only has
+                # load/unload, and this has to work on both
+                _run(["launchctl", "unload", str(path)])
+                _run(["launchctl", "load", "-w", str(path)], check=True)
+        ok("installed as a launchd service — it starts at login and restarts on crash")
+        print(f"  files: {target}/{SERVICE_LABEL}.*.plist")
+        print("  stop it with `sursumai service uninstall`")
+        return
+
+    if not _which("systemctl"):
+        raise CliError("no systemctl here — this needs systemd (or macOS launchd)")
+    target = _systemd_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    for name, command in commands.items():
+        path = target / f"sursumai-{name}.service"
+        path.write_text(_unit(name, command, env), encoding="utf-8")
+        path.chmod(0o600)
+    _run(["systemctl", "--user", "daemon-reload"], check=True)
+    units = [f"sursumai-{n}.service" for n in commands]
+    _run(["systemctl", "--user", "enable", "--now", *units], check=True)
+    ok("installed as a systemd user service — it restarts on crash")
+    print(f"  files: {target}/sursumai-*.service")
+    # without linger a user service dies at logout, which is not what anyone
+    # installing a service meant, and it is not something we can set for them
+    if _run(["loginctl", "show-user", str(os.getuid()), "-p", "Linger"]) \
+            .stdout.strip() != "Linger=yes":
+        warn("to survive logout and reboot on a server, also run: "
+             f"sudo loginctl enable-linger {os.environ.get('USER', '$USER')}")
+    print("  stop it with `sursumai service uninstall`")
+
+
+def _service_uninstall() -> None:
+    names = list(_service_commands())
+    if _is_mac():
+        domain = f"gui/{os.getuid()}"
+        for name in names:
+            path = _launchd_dir() / f"{SERVICE_LABEL}.{name}.plist"
+            _run(["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}.{name}"])
+            _run(["launchctl", "unload", str(path)])
+            path.unlink(missing_ok=True)
+        ok("launchd service removed (the processes it started were stopped)")
+        return
+    if not _which("systemctl"):
+        raise CliError("no systemctl here — nothing to remove")
+    units = [f"sursumai-{n}.service" for n in names]
+    _run(["systemctl", "--user", "disable", "--now", *units])
+    for name in names:
+        (_systemd_dir() / f"sursumai-{name}.service").unlink(missing_ok=True)
+    _run(["systemctl", "--user", "daemon-reload"])
+    ok("systemd service removed (the processes it started were stopped)")
+
+
+def _service_status(as_json: bool) -> None:
+    names = list(_service_commands())
+    if _is_mac():
+        installed = {n: (_launchd_dir() / f"{SERVICE_LABEL}.{n}.plist").exists()
+                     for n in names}
+        listed = _run(["launchctl", "list"]).stdout
+        loaded = {n: f"{SERVICE_LABEL}.{n}" in listed for n in names}
+        kind = "launchd"
+    else:
+        installed = {n: (_systemd_dir() / f"sursumai-{n}.service").exists() for n in names}
+        loaded = {n: _run(["systemctl", "--user", "is-active",
+                           f"sursumai-{n}.service"]).stdout.strip() == "active"
+                  for n in names}
+        kind = "systemd"
+    rows = {n: {"installed": installed[n], "active": loaded[n]} for n in names}
+    if emit({"manager": kind, "services": rows}, as_json):
+        return
+    if not any(installed.values()):
+        print(f"not installed as a {kind} service — "
+              "`sursumai service install` sets it up")
+        return
+    for name in names:
+        state = "active" if loaded[name] else "inactive"
+        print(f"{name:8} {'installed' if installed[name] else 'missing':10} {state}")
+
+
+def cmd_service(args: argparse.Namespace) -> None:
+    action = args.action
+    if action == "install":
+        _service_install()
+    elif action == "uninstall":
+        _service_uninstall()
+    else:
+        _service_status(getattr(args, "json", False))
+
+
+def _which(name: str) -> str | None:
+    import shutil
+
+    return shutil.which(name)
 
 
 # ---------- api commands ----------
@@ -659,6 +905,7 @@ COMMANDS = {
     "destroy": cmd_destroy,
     "update": cmd_update,
     "uninstall": cmd_uninstall,
+    "service": cmd_service,
 }
 
 
@@ -731,6 +978,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("uninstall", "remove SursumAI from this computer")
     p.add_argument("--yes", action="store_true", help="skip confirmation")
+
+    p_service = add("service", "keep SursumAI running across crashes and reboots")
+    p_service.add_argument("action", nargs="?", default="status",
+                           choices=["install", "uninstall", "status"])
+    p_service.add_argument("--json", action="store_true")
 
     return parser
 

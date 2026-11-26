@@ -367,6 +367,30 @@ class Store:
             )
             """
         )
+        # What happened to a deploy, and when. A deploy carried a single
+        # `error` column, overwritten on every transition, so "why did this go
+        # failed at 3am and recover at 3:02" had no answer anywhere — the
+        # router already kept its decisions in router_log while the deploy,
+        # the more important object, kept nothing. This is the history a
+        # pipeline needs to be debuggable after the fact.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deploy_events (
+                id TEXT PRIMARY KEY,
+                deploy_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        # every read is "this deploy, newest first"; without the index each
+        # one scans the whole table, which is the mistake `metrics` already made
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_deploy_events_deploy "
+            "ON deploy_events(deploy_id, created_at DESC)"
+        )
 
     # ---- users ----
 
@@ -537,6 +561,9 @@ class Store:
                 deploy = Deploy(spec, user_id, machine_id=machine_id)
                 try:
                     self._upsert(deploy)
+                    # the history starts at birth, so the first row answers
+                    # "when was this asked for" and not just "when did it fail"
+                    self.record_event(deploy.id, user_id, deploy.status)
                     return deploy
                 except sqlite3.IntegrityError:
                     # someone took that port between the read and the write
@@ -558,12 +585,61 @@ class Store:
 
     def update(self, deploy: Deploy) -> None:
         deploy.updated_at = _now()
+        # read the stored state before overwriting it: this is the only place
+        # every transition passes through, and the comparison is what keeps
+        # the history to real changes instead of one row per reconcile pass
+        row = self._conn.execute(
+            "SELECT status, error FROM deploys WHERE id = ?", (deploy.id,)
+        ).fetchone()
+        changed = row is None or (row["status"], row["error"]) != (deploy.status, deploy.error)
         self._upsert(deploy)
+        if changed:
+            self.record_event(deploy.id, deploy.user_id, deploy.status, deploy.error)
 
     def delete(self, id: str) -> None:
         self._conn.execute("DELETE FROM deploys WHERE id = ?", (id,))
         self._conn.execute("DELETE FROM metrics WHERE deploy_id = ?", (id,))
+        self._conn.execute("DELETE FROM deploy_events WHERE deploy_id = ?", (id,))
         self._conn.commit()
+
+    # ---- deploy history ----
+
+    # A deploy that flaps writes a pair of rows every time, and nobody reads
+    # past the first screenful. Same reasoning as METRICS_KEEP, with a much
+    # smaller number because these are transitions, not samples.
+    EVENTS_KEEP = 200
+
+    def record_event(self, deploy_id: str, user_id: str, status: str,
+                     error: str | None = None) -> None:
+        self._conn.execute(
+            "INSERT INTO deploy_events (id, deploy_id, user_id, status, error, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, deploy_id, user_id, status, error, _now()),
+        )
+        self._conn.commit()
+        self._prune_events(deploy_id)
+
+    def _prune_events(self, deploy_id: str) -> None:
+        self._conn.execute(
+            """
+            DELETE FROM deploy_events
+            WHERE deploy_id = ? AND id NOT IN (
+                SELECT id FROM deploy_events WHERE deploy_id = ?
+                ORDER BY created_at DESC, rowid DESC LIMIT ?
+            )
+            """,
+            (deploy_id, deploy_id, self.EVENTS_KEEP),
+        )
+        self._conn.commit()
+
+    def list_events(self, deploy_id: str, limit: int = 100) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT status, error, created_at FROM deploy_events "
+            "WHERE deploy_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (deploy_id, limit),
+        ).fetchall()
+        return [{"status": r["status"], "error": r["error"], "at": r["created_at"]}
+                for r in rows]
 
     def clear_metrics(self, deploy_id: str) -> None:
         self._conn.execute("DELETE FROM metrics WHERE deploy_id = ?", (deploy_id,))

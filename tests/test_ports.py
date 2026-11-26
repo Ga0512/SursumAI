@@ -263,3 +263,48 @@ def test_a_port_that_would_break_the_install_is_refused_at_start(env, why):
     a service sitting where a model is about to listen."""
     with pytest.raises(SystemExit, match=why):
         _ports_with(**env)
+
+
+# ---- which browsers may call the central ----
+
+def test_the_dashboard_origins_are_always_allowed(monkeypatch):
+    monkeypatch.delenv("SURSUMAI_BIND", raising=False)
+    monkeypatch.delenv("SURSUMAI_CORS_ORIGINS", raising=False)
+    allowed = ports.cors_origins()
+    assert f"http://localhost:{ports.WEB_PORT}" in allowed
+    assert f"http://127.0.0.1:{ports.WEB_PORT}" in allowed
+
+
+def test_the_bound_address_becomes_an_allowed_origin(monkeypatch):
+    """The list was two hardcoded localhost entries, so once SURSUMAI_BIND
+    moved the dashboard to a LAN address the allowance named nobody who could
+    reach it."""
+    monkeypatch.setenv("SURSUMAI_BIND", "192.168.247.4")
+    monkeypatch.delenv("SURSUMAI_CORS_ORIGINS", raising=False)
+    assert f"http://192.168.247.4:{ports.WEB_PORT}" in ports.cors_origins()
+
+
+@pytest.mark.parametrize("bind", ["0.0.0.0", "::", "127.0.0.1", "localhost"])
+def test_a_wildcard_bind_adds_no_origin(monkeypatch, bind):
+    """0.0.0.0 is every interface, which is not an origin any browser can
+    send, so there is nothing to add for it."""
+    monkeypatch.setenv("SURSUMAI_BIND", bind)
+    monkeypatch.delenv("SURSUMAI_CORS_ORIGINS", raising=False)
+    assert ports.cors_origins() == [f"http://localhost:{ports.WEB_PORT}",
+                                    f"http://127.0.0.1:{ports.WEB_PORT}"]
+
+
+def test_an_operator_can_name_their_own_front_end(monkeypatch):
+    """The reason this setting exists: a client's own page calling /v1."""
+    monkeypatch.setenv("SURSUMAI_CORS_ORIGINS",
+                       "https://app.cliente.com, https://staging.cliente.com")
+    assert ports.cors_origins() == ["https://app.cliente.com",
+                                    "https://staging.cliente.com"]
+
+
+def test_a_star_is_passed_through_as_a_wildcard(monkeypatch):
+    """Safe here only because this API authenticates with a bearer token and
+    never a cookie: a hostile page cannot read the key out of another
+    origin's localStorage, so it cannot make an authenticated request."""
+    monkeypatch.setenv("SURSUMAI_CORS_ORIGINS", "*")
+    assert ports.cors_origins() == ["*"]
